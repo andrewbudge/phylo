@@ -14,12 +14,14 @@ pub struct GetheadersArgs {
 }
 
 pub fn run(args: GetheadersArgs) {
-    // open the provided file
-    let filename = args.input.expect("no input file provided");
-    let file = File::open(&filename).expect("Unable to open file");
-
-    // create the reader
-    let reader = BufReader::new(file);
+    // create a reader from file or stdin
+    let reader: Box<dyn BufRead> = match args.input {
+        Some(filename) => {
+            let file = File::open(&filename).expect("Unable to open file");
+            Box::new(BufReader::new(file))
+        }
+        None => Box::new(BufReader::new(std::io::stdin().lock())),
+    };
 
     // track seen headers for unique mode
     let mut seen = HashSet::new();
