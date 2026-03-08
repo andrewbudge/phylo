@@ -48,6 +48,7 @@ $ phylo getheaders -u testdata/test_good.fasta
 - **concat** (liger) — supermatrix concatenation from multiple gene alignments
 - **coverage** — taxa coverage across gene files
 - **scrub** — alignment outlier detection via pairwise p-distances
+- **stats** — basic statistics on FASTA files (length, number of sequences, etc)
 
 ## Author
 
