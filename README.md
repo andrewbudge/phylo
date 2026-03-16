@@ -49,27 +49,27 @@ Supermatrix FASTA is written to stdout, partition boundaries to stderr, and a pr
 
 ```bash
 $ cat taxa.txt
-Mus musculus
-Rattus rattus
-Xenopus laevis
+Mus_musculus
+Rattus_rattus
+Xenopus_laevis
 
 $ phylo concat -l prov.tsv taxa.txt gene1.fasta gene2.fasta > supermatrix.fasta
 gene1.fasta = 1-4
 gene2.fasta = 5-8
 
 $ cat supermatrix.fasta
->Mus musculus
+>Mus_musculus
 ATCGATCG
->Rattus rattus
+>Rattus_rattus
 ATCGNNNN
->Xenopus laevis
+>Xenopus_laevis
 NNNNATCG
 
 $ cat prov.tsv
-taxa.txt    gene1.fasta                  gene2.fasta
-Mouse       AB123.1 Mus musculus gene1   XM456.1 Mus musculus gene2
-Rat         AB124.1 Rattus rattus gene1  MISSING
-Frog        MISSING                      XM789.1 Xenopus laevis gene2
+taxa.txt        gene1.fasta                       gene2.fasta
+Mus_musculus    AB123.1 Mus musculus gene1 cds    XM456.1 Mus musculus gene2 cds
+Rattus_rattus   AB124.1 Rattus rattus gene1 cds   MISSING
+Xenopus_laevis  MISSING                           XM789.1 Xenopus laevis gene2 cds
 ```
 
 NEXUS output bundles the alignment and partitions into one file:
@@ -81,9 +81,9 @@ BEGIN DATA;
   DIMENSIONS NTAX=3 NCHAR=8;
   FORMAT DATATYPE=DNA MISSING=N GAP=-;
   MATRIX
-  Mus musculus    ATCGATCG
-  Rattus rattus   ATCGNNNN
-  Xenopus laevis  NNNNATCG
+  Mus_musculus    ATCGATCG
+  Rattus_rattus   ATCGNNNN
+  Xenopus_laevis  NNNNATCG
 ;
 END;
 BEGIN SETS;
@@ -104,6 +104,7 @@ END;
 - **stats** — basic statistics on FASTA files (length, number of sequences, etc)
 - **view** - in terminal alignment viewer
 - **slice** - cut out and remove sections of an alignment (remove non-homologous seqs, extract homologous seqs)
+- **convert** - convert between sequence data file types (FASTA, Nexus, Relaxed and Strict Phylip)
 
 ## Development Note
 
