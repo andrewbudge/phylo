@@ -43,20 +43,53 @@ Sequence2
 
 Concatenate multiple gene alignments into a supermatrix. Uses smart substring matching to link taxa names to FASTA headers, so input files don't need clean headers. Longer taxon names match first to prevent partial collisions.
 
-Supermatrix FASTA is written to stdout, partition boundaries to stderr.
+Supermatrix FASTA is written to stdout, partition boundaries to stderr, and a provenance TSV to a required log file. The provenance TSV records exactly which original FASTA header matched each taxon for each gene — an audit trail for verifying the automated matching.
 
 **Example:**
 
 ```bash
-$ phylo concat taxa.txt COX1.fasta ND2.fasta > supermatrix.fasta
-COX1.fasta = 1-1545
-ND2.fasta = 1546-2589
+$ phylo concat -l prov.tsv taxa.txt gene1.fasta gene2.fasta > supermatrix.fasta
+gene1.fasta = 1-4
+gene2.fasta = 5-8
 
-$ phylo concat -m ? taxa.txt COX1.fasta ND2.fasta > supermatrix.fasta  # use ? for missing data
+$ cat supermatrix.fasta
+>Mouse
+ATCGATCG
+>Rat
+ATCGNNNN
+>Frog
+NNNNATCG
+
+$ cat prov.tsv
+taxa.txt    gene1.fasta                  gene2.fasta
+Mouse       AB123.1 Mus musculus gene1   XM456.1 Mus musculus gene2
+Rat         AB124.1 Rattus rattus gene1  MISSING
+Frog        MISSING                      XM789.1 Xenopus laevis gene2
+```
+
+NEXUS output bundles the alignment and partitions into one file:
+
+```bash
+$ phylo concat -l prov.tsv -f nexus taxa.txt gene1.fasta gene2.fasta
+#NEXUS
+BEGIN DATA;
+  DIMENSIONS NTAX=3 NCHAR=8;
+  FORMAT DATATYPE=DNA MISSING=N GAP=-;
+  MATRIX
+  Mouse    ATCGATCG
+  Rat      ATCGNNNN
+  Frog     NNNNATCG
+;
+END;
+BEGIN SETS;
+  CHARSET gene1.fasta = 1-4;
+  CHARSET gene2.fasta = 5-8;
+END;
 ```
 
 **Flags:**
-- `-f, --format` — output format: fasta (default) or nexus
+- `-l, --log` — provenance TSV output file (required)
+- `-f, --format` — output format: fasta (default), nexus (also accepts `n` or `nex`)
 - `-m, --missing` — character for missing data (default: N)
 
 ## Planned Subcommands
@@ -65,7 +98,7 @@ $ phylo concat -m ? taxa.txt COX1.fasta ND2.fasta > supermatrix.fasta  # use ? f
 - **scrub** — alignment outlier detection via pairwise p-distances
 - **stats** — basic statistics on FASTA files (length, number of sequences, etc)
 - **view** - in terminal alignment viewer
-- **slice** - cut out and remove sections of an alinment (remove non-homologous seqs, extract homologous seqs)
+- **slice** - cut out and remove sections of an alignment (remove non-homologous seqs, extract homologous seqs)
 
 ## Development Note
 

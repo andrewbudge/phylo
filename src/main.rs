@@ -1,6 +1,13 @@
 use clap::{Parser, Subcommand};
 
-// point to my command
+// Exit silently on broken pipe (e.g., piping to head/tail)
+#[cfg(unix)]
+fn reset_sigpipe() {
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
+}
+
 mod cmd;
 
 #[derive(Parser)]
@@ -21,6 +28,9 @@ enum Commands {
 }
 
 fn main() {
+    #[cfg(unix)]
+    reset_sigpipe();
+
     let cli = Cli::parse();
     match cli.command {
         Commands::Getheaders(args) => cmd::getheaders::run(args),
