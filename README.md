@@ -48,16 +48,21 @@ Supermatrix FASTA is written to stdout, partition boundaries to stderr, and a pr
 **Example:**
 
 ```bash
+$ cat taxa.txt
+Mus musculus
+Rattus rattus
+Xenopus laevis
+
 $ phylo concat -l prov.tsv taxa.txt gene1.fasta gene2.fasta > supermatrix.fasta
 gene1.fasta = 1-4
 gene2.fasta = 5-8
 
 $ cat supermatrix.fasta
->Mouse
+>Mus musculus
 ATCGATCG
->Rat
+>Rattus rattus
 ATCGNNNN
->Frog
+>Xenopus laevis
 NNNNATCG
 
 $ cat prov.tsv
@@ -76,9 +81,9 @@ BEGIN DATA;
   DIMENSIONS NTAX=3 NCHAR=8;
   FORMAT DATATYPE=DNA MISSING=N GAP=-;
   MATRIX
-  Mouse    ATCGATCG
-  Rat      ATCGNNNN
-  Frog     NNNNATCG
+  Mus musculus    ATCGATCG
+  Rattus rattus   ATCGNNNN
+  Xenopus laevis  NNNNATCG
 ;
 END;
 BEGIN SETS;
