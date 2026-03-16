@@ -39,14 +39,33 @@ Sequence1
 Sequence2
 ```
 
+### concat (liger)
+
+Concatenate multiple gene alignments into a supermatrix. Uses smart substring matching to link taxa names to FASTA headers, so input files don't need clean headers. Longer taxon names match first to prevent partial collisions.
+
+Supermatrix FASTA is written to stdout, partition boundaries to stderr.
+
+**Example:**
+
+```bash
+$ phylo concat taxa.txt COX1.fasta ND2.fasta > supermatrix.fasta
+COX1.fasta = 1-1545
+ND2.fasta = 1546-2589
+
+$ phylo concat -m ? taxa.txt COX1.fasta ND2.fasta > supermatrix.fasta  # use ? for missing data
+```
+
+**Flags:**
+- `-f, --format` — output format: fasta (default) or nexus
+- `-m, --missing` — character for missing data (default: N)
+
 ## Planned Subcommands
 
-- **concat** (liger) — supermatrix concatenation from multiple gene alignments
 - **coverage** — taxa coverage across gene files
 - **scrub** — alignment outlier detection via pairwise p-distances
 - **stats** — basic statistics on FASTA files (length, number of sequences, etc)
 - **view** - in terminal alignment viewer
-- **slice*** - cut out and remove sections of an alinment (remove non-homologous seqs, extract homologous seqs)
+- **slice** - cut out and remove sections of an alinment (remove non-homologous seqs, extract homologous seqs)
 
 ## Development Note
 
