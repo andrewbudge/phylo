@@ -1,5 +1,5 @@
 use clap::Args;
-use phylo::{load_taxa_list, parse_fasta};
+use cladekit::{load_taxa_list, parse_fasta};
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::Write;
@@ -150,14 +150,16 @@ pub fn run(args: ConcatArgs) {
             } else {
                 let missing_char = match &args.missing {
                     Some(m) => m.clone(),
-                    None => if is_mixed {
-                        "?".to_string()
-                    } else {
-                        match gene_types[i] {
-                            DataType::Dna => "N".to_string(),
-                            DataType::AminoAcid => "X".to_string(),
+                    None => {
+                        if is_mixed {
+                            "?".to_string()
+                        } else {
+                            match gene_types[i] {
+                                DataType::Dna => "N".to_string(),
+                                DataType::AminoAcid => "X".to_string(),
+                            }
                         }
-                    },
+                    }
                 };
                 entry.push_str(&missing_char.repeat(**length));
             }
@@ -169,7 +171,12 @@ pub fn run(args: ConcatArgs) {
     let mut position = 1;
     for (i, (file, _matched, length)) in matched_genes.iter().enumerate() {
         let name = Path::new(file).file_name().unwrap().to_str().unwrap();
-        partitions.push((name.to_string(), position, position + *length - 1, &gene_types[i]));
+        partitions.push((
+            name.to_string(),
+            position,
+            position + *length - 1,
+            &gene_types[i],
+        ));
         position = position + *length;
     }
     let total_length = position - 1;
@@ -197,7 +204,10 @@ pub fn run(args: ConcatArgs) {
         println!("#NEXUS");
         println!("BEGIN DATA;");
         println!("  DIMENSIONS NTAX={} NCHAR={};", taxa.len(), total_length);
-        println!("  FORMAT DATATYPE={} MISSING={} GAP=-;", nexus_datatype, nexus_missing);
+        println!(
+            "  FORMAT DATATYPE={} MISSING={} GAP=-;",
+            nexus_datatype, nexus_missing
+        );
         println!("  MATRIX");
         for taxon in &taxa {
             println!("  {}    {}", taxon, supermatrix[taxon]);

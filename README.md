@@ -1,23 +1,23 @@
-# Phylo
+# Cladekit
 
-Phylo is a lightweight, composable CLI phylogenetics toolkit. A single binary, Phylo provides many subcommands that replace common chains of bash commands or a collection of individual programs in phylogenetic pipelines. Examples include header extraction, concatenation, and alignment quality control.
+Cladekit is a lightweight, composable CLI phylogenetics toolkit. A single binary, Cladekit provides many subcommands that replace common chains of bash commands or a collection of individual programs in phylogenetic pipelines. Examples include header extraction, concatenation, and alignment quality control.
 
-**Note:** Phylo is under active development. Subcommands may change or be added as the project matures.
+**Note:** Cladekit is under active development. Subcommands may change or be added as the project matures.
 
 ## Install
 
 Requires [Rust](https://www.rust-lang.org/tools/install).
 
 ```bash
-cargo install --git https://github.com/andrewbudge/phylo
+cargo install --git https://github.com/andrewbudge/cladekit
 ```
 
-This builds the binary and adds `phylo` to your PATH.
+This builds the binary and adds `cladekit` to your PATH.
 
 To update to the latest version:
 
 ```bash
-cargo install --force --git https://github.com/andrewbudge/phylo
+cargo install --force --git https://github.com/andrewbudge/cladekit
 ```
 
 ## Subcommands
@@ -29,12 +29,12 @@ Extract headers from FASTA files.
 **Example:**
 
 ```bash
-$ phylo getheaders testdata/test_good.fasta
+$ cladekit getheaders testdata/test_good.fasta
 Sequence1
 Sequence2
 Sequence1
 
-$ phylo getheaders -u testdata/test_good.fasta
+$ cladekit getheaders -u testdata/test_good.fasta
 Sequence1
 Sequence2
 ```
@@ -45,7 +45,7 @@ Concatenate multiple gene alignments into a supermatrix. Unlike other tools, inp
 
 **Benchmark vs FASconCAT-G:**
 
-| Scale | Taxa x Genes | phylo | FASconCAT-G | Speedup |
+| Scale | Taxa x Genes | cladekit | FASconCAT-G | Speedup |
 |---|---|---|---|---|
 | Small | 100 x 20 | 19ms | 12s | **637x** |
 | Medium | 300 x 50 | 146ms | 4 min | **1,646x** |
@@ -62,7 +62,7 @@ Concat auto-detects DNA vs amino acid data per gene and adjusts missing characte
 **Exact match — clean headers:**
 
 ```bash
-$ phylo concat gene1.fasta gene2.fasta > supermatrix.fasta
+$ cladekit concat gene1.fasta gene2.fasta > supermatrix.fasta
 DNA, gene1.fasta = 1-4
 DNA, gene2.fasta = 5-8
 ```
@@ -75,7 +75,7 @@ Mus_musculus
 Rattus_rattus
 Xenopus_laevis
 
-$ phylo concat -a alias.txt -l prov.tsv gene1.fasta gene2.fasta > supermatrix.fasta
+$ cladekit concat -a alias.txt -l prov.tsv gene1.fasta gene2.fasta > supermatrix.fasta
 DNA, gene1.fasta = 1-4
 DNA, gene2.fasta = 5-8
 
@@ -97,7 +97,7 @@ Xenopus_laevis	MISSING	XM789.1 Xenopus laevis gene2 cds
 **NEXUS output:**
 
 ```bash
-$ phylo concat -a alias.txt -l prov.tsv -f nexus gene1.fasta gene2.fasta
+$ cladekit concat -a alias.txt -l prov.tsv -f nexus gene1.fasta gene2.fasta
 #NEXUS
 BEGIN DATA;
   DIMENSIONS NTAX=3 NCHAR=8;
@@ -140,7 +140,7 @@ Get basic alignment statistics from FASTA files. Accepts multiple files via glob
 **Example:**
 
 ```bash
-$ phylo stats supermatrix.fasta proteins.fasta
+$ cladekit stats supermatrix.fasta proteins.fasta
 file	sequences	length	type	gc_pct	missing_pct	variable	variable_pct	informative	informative_pct
 supermatrix.fasta	3	8	DNA	50.0	33.3	0	0.0	0	0.0
 proteins.fasta	4	20	AA	NA	0.0	3	15.0	2	10.0
@@ -156,7 +156,7 @@ proteins.fasta	4	20	AA	NA	0.0	3	15.0	2	10.0
 
 ## Development Note
 
-Phylo is being built as both a real research tool and a vehicle for learning Rust. Development is assisted by Claude (Anthropic), which serves as a teaching aid and coding partner. The design, domain knowledge, and direction are the author's own.
+Cladekit is being built as both a real research tool and a vehicle for learning Rust. Development is assisted by Claude (Anthropic), which serves as a teaching aid and coding partner. The design, domain knowledge, and direction are the author's own.
 
 ## Author
 

@@ -1,5 +1,5 @@
 use clap::Args;
-use phylo::parse_fasta;
+use cladekit::parse_fasta;
 use std::collections::HashMap;
 use std::path::Path;
 
