@@ -57,14 +57,14 @@ Concat runs in two modes:
 - **Exact match (default):** headers must match exactly across files, like FASconCAT and AMAS.
 - **Smart match (`-a alias.txt`):** pass an alias list — a file of clean output names (one per line, e.g. `Mus_musculus`) that get matched to messy input headers via case-insensitive substring search. Underscores in aliases match spaces in headers, so `Mus_musculus` finds `AB123.1 Mus musculus COX1 gene, partial cds`. Longer aliases match first to prevent partial collisions. The alias list doubles as a rename map — input headers stay messy, output gets clean names. Requires `-l` for a provenance TSV that records exactly which original header matched each alias.
 
-FASTA output goes to stdout, partition boundaries to stderr. NEXUS bundles everything into one file.
+Concat auto-detects DNA vs amino acid data per gene and adjusts missing characters and partition labels accordingly. FASTA output goes to stdout, partition boundaries to stderr in RAxML/IQ-TREE format by default. NEXUS bundles everything into one file.
 
 **Exact match — clean headers:**
 
 ```bash
 $ phylo concat gene1.fasta gene2.fasta > supermatrix.fasta
-gene1.fasta = 1-4
-gene2.fasta = 5-8
+DNA, gene1.fasta = 1-4
+DNA, gene2.fasta = 5-8
 ```
 
 **Smart match — messy headers with an alias list:**
@@ -76,8 +76,8 @@ Rattus_rattus
 Xenopus_laevis
 
 $ phylo concat -a alias.txt -l prov.tsv gene1.fasta gene2.fasta > supermatrix.fasta
-gene1.fasta = 1-4
-gene2.fasta = 5-8
+DNA, gene1.fasta = 1-4
+DNA, gene2.fasta = 5-8
 
 $ cat supermatrix.fasta
 >Mus_musculus
@@ -118,7 +118,8 @@ END;
 - `-a, --alias` — alias list for smart matching (clean output names that map to messy input headers)
 - `-l, --log` — provenance TSV output file (required with `-a`)
 - `-f, --format` — output format: fasta (default), nexus (also accepts `n` or `nex`)
-- `-m, --missing` — character for missing data (default: N)
+- `-m, --missing` — override missing data character (default: auto per data type — N for DNA, X for amino acid, ? for mixed)
+- `-p, --partitions` — partition format: raxml (default, also used by IQ-TREE) or nexus
 
 ### stats
 

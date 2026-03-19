@@ -18,9 +18,13 @@ pub struct ConcatArgs {
     #[arg(short, long, default_value = "FASTA")]
     pub format: String,
 
-    /// Missing character
-    #[arg(short, long, default_value = "N")]
-    pub missing: String,
+    /// Override missing data character (default: N for DNA, X for amino acid)
+    #[arg(short, long)]
+    pub missing: Option<String>,
+
+    /// Partition format: raxml (default) or nexus
+    #[arg(short = 'p', long = "partitions", default_value = "raxml")]
+    pub partitions: String,
 
     /// Provenance TSV output file (required with -a)
     #[arg(short = 'l', long = "log")]
@@ -58,6 +62,22 @@ fn match_taxa(
         }
     }
     results
+}
+
+enum DataType {
+    Dna,
+    AminoAcid,
+}
+
+fn detect_data_type(sequence: &str) -> DataType {
+    if sequence
+        .chars()
+        .any(|c| matches!(c, 'E' | 'F' | 'I' | 'L' | 'P' | 'Q'))
+    {
+        DataType::AminoAcid
+    } else {
+        DataType::Dna
+    }
 }
 
 pub fn run(args: ConcatArgs) {
@@ -103,28 +123,73 @@ pub fn run(args: ConcatArgs) {
         }
     }
 
+    // Detect data type per gene using first available sequence
+    let gene_types: Vec<DataType> = matched_genes
+        .iter()
+        .map(|(_, matched, _)| {
+            matched
+                .values()
+                .next()
+                .map(|(_, seq)| detect_data_type(seq))
+                .unwrap_or(DataType::Dna)
+        })
+        .collect();
+
+    // Determine overall data type mix
+    let has_dna = gene_types.iter().any(|t| matches!(t, DataType::Dna));
+    let has_aa = gene_types.iter().any(|t| matches!(t, DataType::AminoAcid));
+    let is_mixed = has_dna && has_aa;
+
     // Build supermatrix: concatenate matched sequences per taxon, fill gaps with missing char
     let mut supermatrix: HashMap<String, String> = HashMap::new();
     for taxon in &taxa {
-        for (_file, matched, length) in &matched_genes {
+        for (i, (_file, matched, length)) in matched_genes.iter().enumerate() {
             let entry = supermatrix.entry(taxon.clone()).or_insert(String::new());
             if matched.contains_key(taxon) {
                 entry.push_str(&matched[taxon].1);
             } else {
-                entry.push_str(&args.missing.repeat(**length));
+                let missing_char = match &args.missing {
+                    Some(m) => m.clone(),
+                    None => if is_mixed {
+                        "?".to_string()
+                    } else {
+                        match gene_types[i] {
+                            DataType::Dna => "N".to_string(),
+                            DataType::AminoAcid => "X".to_string(),
+                        }
+                    },
+                };
+                entry.push_str(&missing_char.repeat(**length));
             }
         }
     }
 
-    // Build partition boundaries (used by both output formats)
+    // Build partition boundaries with data type (used by both output formats)
     let mut partitions = Vec::new();
     let mut position = 1;
-    for (file, _matched, length) in &matched_genes {
+    for (i, (file, _matched, length)) in matched_genes.iter().enumerate() {
         let name = Path::new(file).file_name().unwrap().to_str().unwrap();
-        partitions.push((name.to_string(), position, position + *length - 1));
+        partitions.push((name.to_string(), position, position + *length - 1, &gene_types[i]));
         position = position + *length;
     }
     let total_length = position - 1;
+
+    // Determine overall data type label for NEXUS output
+    let nexus_datatype = match (has_dna, has_aa) {
+        (true, true) => "MIXED",
+        (false, true) => "PROTEIN",
+        _ => "DNA",
+    };
+
+    // Default missing char for NEXUS format line
+    let nexus_missing = match &args.missing {
+        Some(m) => m.clone(),
+        None => match (has_dna, has_aa) {
+            (true, true) => "?".to_string(),
+            (false, true) => "X".to_string(),
+            _ => "N".to_string(),
+        },
+    };
 
     let fmt = args.format.to_lowercase();
     if fmt == "nexus" || fmt == "n" || fmt == "nex" {
@@ -132,7 +197,7 @@ pub fn run(args: ConcatArgs) {
         println!("#NEXUS");
         println!("BEGIN DATA;");
         println!("  DIMENSIONS NTAX={} NCHAR={};", taxa.len(), total_length);
-        println!("  FORMAT DATATYPE=DNA MISSING={} GAP=-;", args.missing);
+        println!("  FORMAT DATATYPE={} MISSING={} GAP=-;", nexus_datatype, nexus_missing);
         println!("  MATRIX");
         for taxon in &taxa {
             println!("  {}    {}", taxon, supermatrix[taxon]);
@@ -140,18 +205,32 @@ pub fn run(args: ConcatArgs) {
         println!(";");
         println!("END;");
         println!("BEGIN SETS;");
-        for (name, start, end) in &partitions {
+        for (name, start, end, _) in &partitions {
             println!("  CHARSET {} = {}-{};", name, start, end);
         }
         println!("END;");
     } else {
-        // FASTA: supermatrix to stdout, partitions to stderr
+        // FASTA: supermatrix to stdout
         for taxon in &taxa {
             println!(">{}", taxon);
             println!("{}", supermatrix[taxon]);
         }
-        for (name, start, end) in &partitions {
-            eprintln!("{} = {}-{}", name, start, end);
+    }
+
+    // Partitions to stderr
+    let part_fmt = args.partitions.to_lowercase();
+    if part_fmt == "nexus" || part_fmt == "n" || part_fmt == "nex" {
+        for (name, start, end, _) in &partitions {
+            eprintln!("CHARSET {} = {}-{};", name, start, end);
+        }
+    } else {
+        // RAxML/IQ-TREE format (default)
+        for (name, start, end, dtype) in &partitions {
+            let model = match dtype {
+                DataType::Dna => "DNA",
+                DataType::AminoAcid => "WAG",
+            };
+            eprintln!("{}, {} = {}-{}", model, name, start, end);
         }
     }
 
@@ -159,8 +238,7 @@ pub fn run(args: ConcatArgs) {
     if smart_matching {
         let log_path = args.log.as_ref().unwrap();
         let taxa_file = args.alias.as_ref().unwrap();
-        let mut log_file =
-            File::create(log_path).expect("Failed to create provenance log file");
+        let mut log_file = File::create(log_path).expect("Failed to create provenance log file");
         // Header row: taxa list filename, then each gene filename
         let gene_names: Vec<String> = matched_genes
             .iter()
