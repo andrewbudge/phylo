@@ -31,6 +31,9 @@ enum Commands {
 
     /// Summarize taxa coverage from a concat provenance TSV
     Coverage(cmd::coverage::CoverageArgs),
+
+    /// Convert between common sequence data file types
+    Convert(cmd::convert::ConvertArgs),
 }
 
 fn main() {
@@ -43,5 +46,6 @@ fn main() {
         Commands::Concat(args) => cmd::concat::run(args),
         Commands::Stats(args) => cmd::stats::run(args),
         Commands::Coverage(args) => cmd::coverage::run(args),
+        Commands::Convert(args) => cmd::convert::run(args),
     }
 }

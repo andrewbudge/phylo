@@ -43,15 +43,6 @@ Sequence2
 
 Concatenate multiple gene alignments into a supermatrix. Unlike other tools, input files can live anywhere and globs are accepted.
 
-**Benchmark vs FASconCAT-G:**
-
-| Scale | Taxa x Genes | cladekit | FASconCAT-G | Speedup |
-|---|---|---|---|---|
-| Small | 100 x 20 | 19ms | 12s | **637x** |
-| Medium | 300 x 50 | 146ms | 4 min | **1,646x** |
-| Large | 1,000 x 30 | 225ms | 5.4 min | **1,438x** |
-| Mega | 4,000 x 30 | 968ms | crash | - |
-
 Concat runs in two modes:
 
 - **Exact match (default):** headers must match exactly across files, like FASconCAT and AMAS.
@@ -146,9 +137,35 @@ supermatrix.fasta	3	8	DNA	50.0	33.3	0	0.0	0	0.0
 proteins.fasta	4	20	AA	NA	0.0	3	15.0	2	10.0
 ```
 
-## Planned Subcommands
+**Flags:**
+- `-d, --detailed` — per-sequence statistics (header, length, GC%, missingness)
+- `-p, --pretty` — column-aligned output for readability
 
-- **coverage** — taxa coverage across gene files
+### coverage
+
+Summarize taxa and loci coverage from a concat provenance TSV. Shows how many loci each taxon appears in, or how many taxa each locus has.
+
+**Example:**
+
+```bash
+$ cladekit coverage -t prov.tsv
+taxa	loci_present	loci_missing	pct_missing
+Mus_musculus	5/5	0/5	0.0%
+Smilodon_populator	2/5	3/5	60.0%
+
+$ cladekit coverage -l -p prov.tsv
+loci          appearance_count  missing_pct
+12S_aln.fas   6/8               25.0%
+COX1_aln.fas  6/8               25.0%
+```
+
+**Flags:**
+- `-t, --taxa` — show per-taxon coverage (how many loci each taxon has)
+- `-l, --loci` — show per-loci coverage (how many taxa each locus has)
+- `-p, --pretty` — column-aligned output for readability
+
+## Planned Subcommands
+- **filter** — remove taxa exceeding a missingness threshold from a supermatrix
 - **scrub** — alignment outlier detection via pairwise p-distances
 - **view** - in terminal alignment viewer
 - **slice** - cut out and remove sections of an alignment (remove non-homologous seqs, extract homologous seqs)
