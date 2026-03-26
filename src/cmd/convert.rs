@@ -1,3 +1,4 @@
+use cladekit::{is_dna, parse_fasta};
 use std::{
     fs::File,
     io::{BufRead, BufReader},
@@ -24,22 +25,20 @@ pub fn run(args: ConvertArgs) {
         .expect("empty file")
         .expect("Failed to read line");
 
-    if first_line.starts_with('>') {
-        println!("This is a fasta")
-    }
+    let sequences = if first_line.starts_with('>') {
+        let (seqs, _) = parse_fasta(&args.input_file, false).expect("Failed to parse fasta file");
+        seqs
+    } else if first_line.starts_with('#') {
+        // TODO: parse_nexus
+        todo!("NEXUS parsing not yet implemented")
+    } else if first_line.chars().next().expect("empty line").is_ascii_digit() {
+        // TODO: parse_phylip
+        todo!("PHYLIP parsing not yet implemented")
+    } else {
+        eprintln!("Error: could not detect input format");
+        std::process::exit(1);
+    };
 
-    if first_line.starts_with('#') {
-        println!("This is a nexus")
-    }
-
-    if first_line
-        .chars()
-        .next()
-        .expect("empty file")
-        .is_ascii_digit()
-    {
-        println!("This is a phylip file")
-    }
-
-    println!("This is working")
+    // TODO: write sequences in requested output format
+    println!("Parsed {} sequences", sequences.len());
 }

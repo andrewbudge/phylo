@@ -1,4 +1,4 @@
-use cladekit::{parse_fasta, print_table};
+use cladekit::{is_dna, parse_fasta, print_table};
 use clap::Args;
 use std::collections::HashMap;
 use std::path::Path;
@@ -22,21 +22,6 @@ struct SequenceStats {
     missing_count: usize,
     total_chrs: usize,
     length: usize,
-}
-
-/// Detect whether sequences are DNA or protein.
-/// Allows IUPAC ambiguity codes (R, Y, S, W, K, M, B, D, H, V) in addition to A/T/C/G/N/-.
-fn is_dna(sequences: &HashMap<String, String>) -> bool {
-    for seq in sequences.values() {
-        for ch in seq.chars() {
-            match ch {
-                'A' | 'T' | 'C' | 'G' | 'N' | '-' | 'R' | 'Y' | 'S' | 'W' | 'K' | 'M' | 'B'
-                | 'D' | 'H' | 'V' | '?' => {}
-                _ => return false,
-            }
-        }
-    }
-    true
 }
 
 /// Count variable and parsimony-informative sites in an alignment.

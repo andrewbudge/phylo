@@ -67,6 +67,21 @@ pub fn parse_fasta(
     Ok((sequences, length))
 }
 
+/// Detect whether sequences are DNA or protein.
+/// Allows IUPAC ambiguity codes (R, Y, S, W, K, M, B, D, H, V) in addition to A/T/C/G/N/-.
+pub fn is_dna(sequences: &HashMap<String, String>) -> bool {
+    for seq in sequences.values() {
+        for ch in seq.chars() {
+            match ch {
+                'A' | 'T' | 'C' | 'G' | 'N' | '-' | 'R' | 'Y' | 'S' | 'W' | 'K' | 'M' | 'B'
+                | 'D' | 'H' | 'V' | '?' => {}
+                _ => return false,
+            }
+        }
+    }
+    true
+}
+
 /// Pretty print a table of rows. When pretty is false, prints tab-separated.
 /// When pretty is true, pads columns to align.
 pub fn print_table(rows: &[Vec<String>], pretty: bool) {
