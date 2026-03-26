@@ -67,6 +67,35 @@ pub fn parse_fasta(
     Ok((sequences, length))
 }
 
+/// Pretty print a table of rows. When pretty is false, prints tab-separated.
+/// When pretty is true, pads columns to align.
+pub fn print_table(rows: &[Vec<String>], pretty: bool) {
+    if !pretty {
+        for row in rows {
+            println!("{}", row.join("\t"));
+        }
+        return;
+    }
+    let num_cols = rows[0].len();
+    let mut widths = vec![0usize; num_cols];
+    for row in rows {
+        for (i, cell) in row.iter().enumerate() {
+            if cell.len() > widths[i] {
+                widths[i] = cell.len();
+            }
+        }
+    }
+    for row in rows {
+        for (i, cell) in row.iter().enumerate() {
+            if i > 0 {
+                print!("  ");
+            }
+            print!("{:<width$}", cell, width = widths[i]);
+        }
+        println!();
+    }
+}
+
 /// Read a taxa list file (one name per line) into a Vec.
 pub fn load_taxa_list(filename: &str) -> Result<Vec<String>, String> {
     let file = File::open(filename).map_err(|e| format!("Could not open {}: {}", filename, e))?;

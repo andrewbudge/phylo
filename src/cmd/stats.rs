@@ -1,4 +1,4 @@
-use cladekit::parse_fasta;
+use cladekit::{parse_fasta, print_table};
 use clap::Args;
 use std::collections::HashMap;
 use std::path::Path;
@@ -70,34 +70,6 @@ fn count_informative_sites(sequences: &HashMap<String, String>, length: usize) -
     }
 
     (variable, informative)
-}
-
-// Pretty print function to make the tables more human readable
-fn print_table(rows: &[Vec<String>], pretty: bool) {
-    if !pretty {
-        for row in rows {
-            println!("{}", row.join("\t"));
-        }
-        return;
-    }
-    let num_cols = rows[0].len();
-    let mut widths = vec![0usize; num_cols];
-    for row in rows {
-        for (i, cell) in row.iter().enumerate() {
-            if cell.len() > widths[i] {
-                widths[i] = cell.len();
-            }
-        }
-    }
-    for row in rows {
-        for (i, cell) in row.iter().enumerate() {
-            if i > 0 {
-                print!("  ");
-            }
-            print!("{:<width$}", cell, width = widths[i]);
-        }
-        println!();
-    }
 }
 
 // Helper func to calc individual seq data
