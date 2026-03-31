@@ -166,12 +166,46 @@ COX1_aln.fas  6/8               25.0%
 - `-l, --loci` — show per-loci coverage (how many taxa each locus has)
 - `-p, --pretty` — column-aligned output for readability
 
+### convert
+
+Convert between common sequence data file types. Auto-detects the input format from file contents.
+
+**Supported formats:**
+- FASTA (`f`)
+- NEXUS (`n` / `nex` / `nexus`)
+- Relaxed PHYLIP (`rp` / `phylip`)
+- Strict PHYLIP (`sp`)
+
+**Example:**
+
+```bash
+$ cladekit convert -o n alignment.fasta
+#NEXUS
+BEGIN DATA;
+  DIMENSIONS NTAX=3 NCHAR=8;
+  FORMAT DATATYPE=DNA MISSING=N GAP=-;
+  MATRIX
+  Taxon_A    ATCGATCG
+  Taxon_B    ATCGATCG
+  Taxon_C    ATCGNNNN
+;
+END;
+
+$ cladekit convert -o rp alignment.nex
+3 8
+Taxon_A    ATCGATCG
+Taxon_B    ATCGATCG
+Taxon_C    ATCGNNNN
+```
+
+**Flags:**
+- `-o, --output_format` — output format: `f` (fasta), `n` (nexus), `rp` (relaxed phylip), `sp` (strict phylip)
+
 ## Planned Subcommands
 - **filter** — remove taxa exceeding a missingness threshold from a supermatrix
 - **scrub** — alignment outlier detection via pairwise p-distances
 - **view** - in terminal alignment viewer
 - **slice** - cut out and remove sections of an alignment (remove non-homologous seqs, extract homologous seqs)
-- **convert** - convert between sequence data file types (FASTA, Nexus, Relaxed and Strict Phylip)
 
 ## Development Note
 
