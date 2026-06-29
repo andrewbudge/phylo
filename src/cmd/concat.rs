@@ -26,7 +26,7 @@ pub struct ConcatArgs {
     #[arg(short = 'p', long = "partitions", default_value = "raxml")]
     pub partitions: String,
 
-    /// Provenance TSV output file (required with -a)
+    /// Provenance TSV output file (required with -a; if a directory is given, writes phorge_concat.log inside it)
     #[arg(short = 'l', long = "log")]
     pub log: Option<String>,
 
@@ -79,6 +79,15 @@ fn detect_data_type(sequence: &str) -> DataType {
         DataType::AminoAcid
     } else {
         DataType::Dna
+    }
+}
+
+fn resolve_log_path(path: &str) -> std::path::PathBuf {
+    let p = Path::new(path);
+    if p.is_dir() {
+        p.join("phorge_concat.log")
+    } else {
+        p.to_path_buf()
     }
 }
 
@@ -247,11 +256,12 @@ pub fn run(args: ConcatArgs) {
             }
 
             if let Some(log_path) = &args.log {
-                let mut f = File::create(log_path).expect("Failed to create provenance log file");
+                let resolved = resolve_log_path(log_path);
+                let mut f = File::create(&resolved).expect("Failed to create provenance log file");
                 for row in &rows {
                     writeln!(f, "{}", row).unwrap();
                 }
-                eprintln!("\nTentative provenance log written to: {}", log_path);
+                eprintln!("\nTentative provenance log written to: {}", resolved.display());
             } else {
                 eprintln!("\n=== Tentative Provenance TSV ===");
                 for row in &rows {
@@ -384,11 +394,12 @@ pub fn run(args: ConcatArgs) {
         }
     }
 
-    // Write provenance TSV (only in smart matching mode, -l is required with -t)
+    // Write provenance TSV (only in smart matching mode, -l is required with -a)
     if smart_matching {
-        let log_path = args.log.as_ref().unwrap();
+        let resolved = resolve_log_path(args.log.as_ref().unwrap());
         let taxa_file = args.alias.as_ref().unwrap();
-        let mut log_file = File::create(log_path).expect("Failed to create provenance log file");
+        let mut log_file = File::create(&resolved).expect("Failed to create provenance log file");
+        eprintln!("Provenance log written to: {}", resolved.display());
         // Header row: taxa list filename, then each gene filename
         let gene_names: Vec<String> = matched_genes
             .iter()
