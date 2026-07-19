@@ -274,7 +274,7 @@ query complete
 **Flags:**
 - `--ingroup` — one or more ingroup TaxIDs (required)
 - `--outgroup` — one or more outgroup TaxIDs
-- `-o, --out` — output directory (writes `query_results.json`)
+- `-o, --out` — output directory (writes `query_results.json` inside it), or a `.json` file path to write the manifest directly
 - `--email` — email address required by NCBI ToS (required)
 - `--api-key` — NCBI API key (optional; raises the rate limit from 3 to 10 req/s)
 ---

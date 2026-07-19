@@ -16,7 +16,7 @@ pub struct QueryArgs {
     #[arg(long, num_args = 1..)]
     pub outgroup: Vec<u64>,
 
-    /// Output directory
+    /// Output directory, or a .json file path to write the manifest directly
     #[arg(long, short = 'o')]
     pub out: PathBuf,
 
@@ -58,9 +58,20 @@ pub async fn run(args: QueryArgs) -> Result<()> {
 
     warn_cross_group_overlap(&results);
 
-    std::fs::create_dir_all(&args.out)
-        .with_context(|| format!("creating output directory {}", args.out.display()))?;
-    let out_path = args.out.join("query_results.json");
+    // A path with a .json extension is treated as the manifest file itself;
+    // anything else (including no extension) is treated as a directory, matching
+    // the pipeline's `-o run/` convention.
+    let out_path = if args.out.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("json")) {
+        if let Some(parent) = args.out.parent().filter(|p| !p.as_os_str().is_empty()) {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("creating output directory {}", parent.display()))?;
+        }
+        args.out.clone()
+    } else {
+        std::fs::create_dir_all(&args.out)
+            .with_context(|| format!("creating output directory {}", args.out.display()))?;
+        args.out.join("query_results.json")
+    };
     // Top-level array: one element per queried taxon across both groups.
     let json = serde_json::to_string_pretty(&results)?;
     std::fs::write(&out_path, json).with_context(|| format!("writing {}", out_path.display()))?;
