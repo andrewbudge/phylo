@@ -8,11 +8,11 @@ use clap::Args;
 pub struct AlignArgs {
     /// Alignment program name or path. Supported: mafft, muscle.
     /// Defaults: mafft uses --auto, muscle uses -align.
-    #[arg(short, long)]
+    #[arg(short, long, default_value = "mafft")]
     pub program: String,
 
     /// Input unaligned FASTA files (glob or list)
-    #[arg(short, long, required = true, num_args = 1..)]
+    #[arg(required = true, num_args = 1..)]
     pub input: Vec<String>,
 
     /// Suffix to append to aligned output filenames (default: _aln)

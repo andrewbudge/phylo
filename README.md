@@ -364,12 +364,12 @@ Done. Wrote 591 cleaned sequence(s) across 7 gene file(s); dropped 2478 duplicat
 ---
 ### align (aln)
 
-Batch align multiple FASTA files using MAFFT or MUSCLE. Runs the aligner on each input file and writes output to a directory with a consistent naming convention. Aligner stderr is captured to `align.log` in the output directory.
+Batch align multiple FASTA files using MAFFT or MUSCLE. **MAFFT is the default alignment program if no program is specified.** Runs the aligner on each input file and writes output to a directory with a consistent naming convention. Aligner stderr is captured to `align.log` in the output directory.
 
 **Example:**
 
 ```bash
-$ phorge align -p mafft -i genes/*.fasta -e _aln -o aligned/
+$ phorge align -p mafft genes/*.fasta -e _aln -o aligned/
 Aligning COI...done
 Aligning ND2...done
 Aligning 12S...done
@@ -380,15 +380,15 @@ Pass custom flags to the aligner after `--` (replaces the default flag):
 
 ```bash
 # mafft — replace --auto
-$ phorge align -p mafft -i genes/*.fasta -e _aln -o aligned/ -- --thread 4 --maxiterate 1000
+$ phorge align -p mafft genes/*.fasta -e _aln -o aligned/ -- --thread 4 --maxiterate 1000
 
 # muscle — replace -align with -super5 for large datasets
-$ phorge align -p muscle -i genes/*.fasta -e _aln -o aligned/ -- -super5
+$ phorge align -p muscle genes/*.fasta -e _aln -o aligned/ -- -super5
 ```
 
 **Flags:**
-- `-p, --program` — alignment program: `mafft` or `muscle` (name or full path)
-- `-i, --input` — input unaligned FASTA files (glob or list)
+- `-p, --program` — alignment program: `mafft` or `muscle` (name or full path), default `mafft`
+- input files — unaligned FASTA files, glob or list (positional, no flag)
 - `-e, --extension` — suffix to append to output filenames (default: `_aln`)
 - `-o, --output` — output directory for aligned files
 - `--` — extra flags passed verbatim to the aligner; replaces the default (`--auto` for mafft, `-align` for muscle)
@@ -478,7 +478,7 @@ phorge extract --refs refs/*.fasta -t run/combined.fasta -o run/genes/
 phorge clean   --genes-dir run/genes/ -q run/query_results.json -o run/clean/ --prefer MyLab
 
 # 2. Build — align, trim, and concatenate into a supermatrix
-phorge align  -p mafft -i run/clean/*.fasta -e _aln -o run/aligned/
+phorge align  -p mafft run/clean/*.fasta -e _aln -o run/aligned/
 phorge curate run/aligned/*.fasta -o run/curated/
 phorge concat run/curated/*.fasta > supermatrix.fasta
 ```
