@@ -74,7 +74,9 @@ enum Commands {
 /// to a file; the lean file tools keep plain stderr.
 fn log_dir(command: &Commands) -> Option<&Path> {
     match command {
-        Commands::Query(a) => Some(a.log_dir.as_deref().unwrap_or(a.out.as_path())),
+        // query is stderr-only: it writes a single TSV file, not an output
+        // directory, so there is nowhere (and no need) for a JSON log.
+        Commands::Query(_) => None,
         Commands::Fetch(a) => Some(a.log_dir.as_deref().unwrap_or(a.out.as_path())),
         Commands::Clean(a) => Some(a.log_dir.as_deref().unwrap_or(a.out.as_path())),
         _ => None,

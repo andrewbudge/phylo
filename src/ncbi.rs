@@ -28,6 +28,25 @@ pub enum NcbiError {
     Shape(String),
 }
 
+impl NcbiError {
+    /// True for transient failures worth retrying: rate-limit (429), timeouts,
+    /// connection drops, and mid-stream body/decode failures (NCBI sometimes
+    /// truncates a large response). Deterministic `Api`/`Shape` errors are never
+    /// retried — the same request would fail the same way.
+    fn is_retryable(&self) -> bool {
+        match self {
+            NcbiError::Http(e) => {
+                e.is_timeout()
+                    || e.is_connect()
+                    || e.is_body()
+                    || e.is_decode()
+                    || e.status() == Some(reqwest::StatusCode::TOO_MANY_REQUESTS)
+            }
+            NcbiError::Api(_) | NcbiError::Shape(_) => false,
+        }
+    }
+}
+
 type DirectLimiter = RateLimiter<NotKeyed, InMemoryState, DefaultClock>;
 
 /// A handle to a result set parked on NCBI's history server, returned by
@@ -37,6 +56,17 @@ pub struct SearchHandle {
     pub count: usize,
     pub web_env: String,
     pub query_key: String,
+}
+
+/// A candidate taxon returned when resolving a scientific/common name to a
+/// TaxID via `esearch db=taxonomy`. `division` (e.g. "Vertebrates", "Bacteria")
+/// is carried so the caller can tell cross-kingdom homonyms apart in the confirm
+/// prompt.
+pub struct TaxonMatch {
+    pub taxid: u64,
+    pub name: String,
+    pub rank: String,
+    pub division: String,
 }
 
 pub struct EutilsClient {
@@ -84,46 +114,52 @@ impl EutilsClient {
         params
     }
 
-    /// Send a prepared request under the rate limiter, transparently retrying on
-    /// HTTP 429. NCBI hands out 429s when we nudge its per-second cap (common when
-    /// sweeping many taxa back-to-back) and expects clients to back off rather
-    /// than fail, so this absorbs them with exponential backoff before surfacing
-    /// any other error. `build` is a closure so each attempt gets a fresh request.
-    async fn send_with_retry(
-        &self,
-        build: impl Fn() -> reqwest::RequestBuilder,
-    ) -> Result<reqwest::Response, NcbiError> {
+    /// Run one request-and-body-read as a single retryable unit, under the rate
+    /// limiter, with exponential backoff. Crucially this wraps the *whole*
+    /// operation — send, status check, and body decode — so a response NCBI drops
+    /// mid-stream ("end of file before message length reached") is retried, not
+    /// just a failed send. `op` is a closure so each attempt issues a fresh
+    /// request. Only transient errors (see [`NcbiError::is_retryable`]) retry;
+    /// deterministic API/shape errors fail fast.
+    async fn retrying<T, Fut>(&self, op: impl Fn() -> Fut) -> Result<T, NcbiError>
+    where
+        Fut: std::future::Future<Output = Result<T, NcbiError>>,
+    {
         const MAX_RETRIES: u32 = 5;
         let mut attempt = 0;
         loop {
             attempt += 1;
             self.limiter.until_ready().await;
-            let resp = build().send().await?;
-            if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS && attempt <= MAX_RETRIES {
-                let backoff = Duration::from_millis(400 * 2u64.pow(attempt - 1));
-                warn!(
-                    attempt,
-                    backoff_ms = backoff.as_millis() as u64,
-                    "NCBI rate-limited (429); backing off"
-                );
-                tokio::time::sleep(backoff).await;
-                continue;
+            match op().await {
+                Ok(value) => return Ok(value),
+                Err(e) if attempt <= MAX_RETRIES && e.is_retryable() => {
+                    let backoff = Duration::from_millis(400 * 2u64.pow(attempt - 1));
+                    warn!(
+                        attempt,
+                        backoff_ms = backoff.as_millis() as u64,
+                        error = %e,
+                        "NCBI request failed transiently; backing off"
+                    );
+                    tokio::time::sleep(backoff).await;
+                }
+                Err(e) => return Err(e),
             }
-            return Ok(resp.error_for_status()?);
         }
     }
 
-    /// Rate-limited GET that returns the parsed JSON body. `error_for_status`
-    /// catches transport-level errors; HTTP-200-with-error-body is handled by
-    /// each caller, which knows where the error field lives.
+    /// Rate-limited GET that returns the parsed JSON body. Send + body decode are
+    /// retried as a unit; HTTP-200-with-error-body is handled by each caller,
+    /// which knows where the error field lives.
     async fn get(&self, endpoint: &str, extra: Vec<(&str, String)>) -> Result<Value, NcbiError> {
         let mut params = self.common_params();
         params.extend(extra);
         let url = format!("{EUTILS_BASE}/{endpoint}");
-        let resp = self
-            .send_with_retry(|| self.http.get(&url).query(&params))
-            .await?;
-        Ok(resp.json::<Value>().await?)
+        self.retrying(|| async {
+            let resp = self.http.get(&url).query(&params).send().await?;
+            let resp = resp.error_for_status()?;
+            Ok(resp.json::<Value>().await?)
+        })
+        .await
     }
 
     /// esearch with `usehistory=y`; parks the full result set on NCBI's history
@@ -214,19 +250,21 @@ impl EutilsClient {
             params.push(("api_key", key.clone()));
         }
         let url = format!("{EUTILS_BASE}/efetch.fcgi");
-        let resp = self
-            .send_with_retry(|| self.http.post(&url).form(&params))
-            .await?;
-        let body = resp.text().await?;
-        // efetch reports bad requests as a 200 carrying a plain-text/HTML error
-        // rather than FASTA; anything without a record marker is an API error.
-        if !body.contains('>') {
-            let snippet: String = body.trim().chars().take(200).collect();
-            return Err(NcbiError::Api(format!(
-                "efetch returned no FASTA records: {snippet}"
-            )));
-        }
-        Ok(body)
+        self.retrying(|| async {
+            let resp = self.http.post(&url).form(&params).send().await?;
+            let resp = resp.error_for_status()?;
+            let body = resp.text().await?;
+            // efetch reports bad requests as a 200 carrying a plain-text/HTML error
+            // rather than FASTA; anything without a record marker is an API error.
+            if !body.contains('>') {
+                let snippet: String = body.trim().chars().take(200).collect();
+                return Err(NcbiError::Api(format!(
+                    "efetch returned no FASTA records: {snippet}"
+                )));
+            }
+            Ok(body)
+        })
+        .await
     }
 
     /// Resolve a TaxID to its scientific name via taxonomy esummary
@@ -242,5 +280,56 @@ impl EutilsClient {
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
             .ok_or_else(|| NcbiError::Shape(format!("no scientificname for taxid {taxid}")))
+    }
+
+    /// Resolve a taxon name to its candidate TaxID(s) via `esearch db=taxonomy`.
+    /// Usually one match; more than one means a homonym the caller must
+    /// disambiguate. An empty vec means no such taxon. A single esummary follows
+    /// to attach name/rank/division to each candidate.
+    pub async fn resolve_taxon_name(&self, name: &str) -> Result<Vec<TaxonMatch>, NcbiError> {
+        let body = self
+            .get(
+                "esearch.fcgi",
+                vec![("db", "taxonomy".to_string()), ("term", name.to_string())],
+            )
+            .await?;
+        let result = body
+            .get("esearchresult")
+            .ok_or_else(|| NcbiError::Shape("missing 'esearchresult'".to_string()))?;
+        if let Some(err) = result.get("ERROR").and_then(|v| v.as_str()) {
+            return Err(NcbiError::Api(err.to_string()));
+        }
+        // For the taxonomy DB the UIDs in idlist are the TaxIDs themselves.
+        let ids: Vec<String> = result
+            .get("idlist")
+            .and_then(|v| v.as_array())
+            .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            .unwrap_or_default();
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let summary = self
+            .get(
+                "esummary.fcgi",
+                vec![("db", "taxonomy".to_string()), ("id", ids.join(","))],
+            )
+            .await?;
+        let result = summary
+            .get("result")
+            .ok_or_else(|| NcbiError::Shape("esummary missing 'result'".to_string()))?;
+
+        let mut matches = Vec::with_capacity(ids.len());
+        for id in &ids {
+            let Some(doc) = result.get(id) else { continue };
+            let field = |k: &str| doc.get(k).and_then(|v| v.as_str()).unwrap_or_default().to_string();
+            matches.push(TaxonMatch {
+                taxid: id.parse().unwrap_or(0),
+                name: field("scientificname"),
+                rank: doc.get("rank").and_then(|v| v.as_str()).unwrap_or("no rank").to_string(),
+                division: field("division"),
+            });
+        }
+        Ok(matches)
     }
 }

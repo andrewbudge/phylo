@@ -1,4 +1,4 @@
-use crate::models::{Accession, QueryResult, TaxonGroup};
+use crate::models::{Accession, TaxonGroup, read_query_tsv};
 use crate::ncbi::EutilsClient;
 use anyhow::{Context, Result, bail};
 use clap::Args;
@@ -11,7 +11,7 @@ use tracing::{info, warn};
 
 #[derive(Args)]
 pub struct FetchArgs {
-    /// Path to query_results.json (written by `query`)
+    /// Path to the query TSV written by `query` (or a user-filtered subset of it)
     #[arg(long, short = 'q')]
     pub query: PathBuf,
 
@@ -141,18 +141,13 @@ pub async fn run(args: FetchArgs) -> Result<()> {
     Ok(())
 }
 
-/// Load `query_results.json` and reduce it to the concrete set of accessions to
+/// Load the query TSV and reduce it to the concrete set of accessions to
 /// download. Metadata only — `slen` was captured at query time, so no network is
 /// touched here. Order of operations matters: ingroup-wins overlap resolution
 /// runs before dedup so a cross-group duplicate is always resolved in the
 /// ingroup's favour.
 fn load_and_preflight(args: &FetchArgs) -> Result<Vec<Accession>> {
-    let content = std::fs::read_to_string(&args.query)
-        .with_context(|| format!("reading {}", args.query.display()))?;
-    let results: Vec<QueryResult> = serde_json::from_str(&content)
-        .with_context(|| format!("parsing {}", args.query.display()))?;
-
-    let mut records: Vec<Accession> = results.into_iter().flat_map(|r| r.accessions).collect();
+    let mut records = read_query_tsv(&args.query)?;
     let records_in = records.len();
 
     // Ingroup wins: a sequence cannot honestly be both ingroup and outgroup, so

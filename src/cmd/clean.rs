@@ -1,4 +1,4 @@
-use crate::models::QueryResult;
+use crate::models::read_query_tsv;
 use anyhow::{Context, Result};
 use clap::Args;
 use phorge::parse_fasta;
@@ -13,7 +13,7 @@ pub struct CleanArgs {
     #[arg(long)]
     pub genes_dir: PathBuf,
 
-    /// Path to query_results.json (the accession -> TaxID/Name join table)
+    /// Path to the query TSV (the accession -> TaxID/Name join table)
     #[arg(long, short = 'q')]
     pub query: PathBuf,
 
@@ -34,7 +34,7 @@ pub struct CleanArgs {
 }
 
 /// Per-record provenance recovered from an extract output header, paired with
-/// the join result. `taxid`/`name` come from query_results.json; `accession`
+/// the join result. `taxid`/`name` come from the query TSV; `accession`
 /// and `ident` come from the extract header itself.
 struct CleanRecord {
     taxid: u64,
@@ -50,7 +50,7 @@ struct CleanRecord {
 }
 
 /// The join target for one accession: everything `clean` needs from
-/// query_results.json. `annotation` is the GenBank title, checked (alongside the
+/// the query TSV. `annotation` is the GenBank title, checked (alongside the
 /// extract header) for `--prefer` substrings since vouchers like "BYU:IGCEP153"
 /// often live only in the title, not the efetch defline.
 struct Taxon {
@@ -60,26 +60,19 @@ struct Taxon {
 }
 
 pub async fn run(args: CleanArgs) -> Result<()> {
-    // Build the accession -> (TaxID, Name) join table from query_results.json.
-    // The JSON is a flat array of QueryResult, each carrying its own accessions;
-    // we flatten across all of them since the join key is the accession alone.
-    let json = fs::read_to_string(&args.query)
-        .with_context(|| format!("reading {}", args.query.display()))?;
-    let results: Vec<QueryResult> =
-        serde_json::from_str(&json).with_context(|| format!("parsing {}", args.query.display()))?;
-
+    // Build the accession -> (TaxID, Name) join table from the query TSV. The
+    // table is a flat list of accessions; the join key is the accession alone.
+    let records = read_query_tsv(&args.query)?;
     let mut join: HashMap<String, Taxon> = HashMap::new();
-    for result in &results {
-        for acc in &result.accessions {
-            join.insert(
-                acc.accession.clone(),
-                Taxon {
-                    taxid: acc.taxid,
-                    name: acc.taxon_name.clone(),
-                    annotation: acc.gene_annotation.clone(),
-                },
-            );
-        }
+    for acc in &records {
+        join.insert(
+            acc.accession.clone(),
+            Taxon {
+                taxid: acc.taxid,
+                name: acc.taxon_name.clone(),
+                annotation: acc.gene_annotation.clone(),
+            },
+        );
     }
 
     fs::create_dir_all(&args.out)
