@@ -1,5 +1,5 @@
-use phorge::parse_fasta;
 use clap::Args;
+use phorge::parse_fasta;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufWriter, Write};
@@ -224,9 +224,17 @@ pub fn run(args: CurateArgs) {
                 // gappy / kpic-* trim on '>=' (keep '<'). Mirror that exactly.
                 let kpi_only = keep_p && !keep_c;
                 let gap_ok = if keep_s {
-                    if kpi_only { s.gappiness <= smart_threshold } else { s.gappiness < smart_threshold }
+                    if kpi_only {
+                        s.gappiness <= smart_threshold
+                    } else {
+                        s.gappiness < smart_threshold
+                    }
                 } else if keep_g {
-                    if kpi_only { s.gappiness <= args.gap_threshold } else { s.gappiness < args.gap_threshold }
+                    if kpi_only {
+                        s.gappiness <= args.gap_threshold
+                    } else {
+                        s.gappiness < args.gap_threshold
+                    }
                 } else {
                     true
                 };

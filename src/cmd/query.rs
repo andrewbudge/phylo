@@ -69,10 +69,16 @@ pub async fn run(args: QueryArgs) -> Result<()> {
     // for names), so a typo aborts before any nuccore querying begins.
     let mut roots: Vec<(u64, TaxonGroup)> = Vec::new();
     for raw in &args.ingroup {
-        roots.push((resolve_input(&client, raw, args.yes).await?, TaxonGroup::Ingroup));
+        roots.push((
+            resolve_input(&client, raw, args.yes).await?,
+            TaxonGroup::Ingroup,
+        ));
     }
     for raw in &args.outgroup {
-        roots.push((resolve_input(&client, raw, args.yes).await?, TaxonGroup::Outgroup));
+        roots.push((
+            resolve_input(&client, raw, args.yes).await?,
+            TaxonGroup::Outgroup,
+        ));
     }
 
     // One TaxonQuery per root, ingroup first then outgroup. Both groups are

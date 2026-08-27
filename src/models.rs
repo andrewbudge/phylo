@@ -121,7 +121,11 @@ pub fn read_query_tsv(path: &Path) -> Result<Vec<Accession>> {
         .next()
         .ok_or_else(|| anyhow::anyhow!("{}: empty query file (no header row)", path.display()))?;
     // Map column name -> position for this file's actual layout.
-    let index: HashMap<&str, usize> = header.split('\t').enumerate().map(|(i, c)| (c, i)).collect();
+    let index: HashMap<&str, usize> = header
+        .split('\t')
+        .enumerate()
+        .map(|(i, c)| (c, i))
+        .collect();
     if !index.contains_key("accession") {
         bail!(
             "{}: query TSV missing required 'accession' column",
@@ -137,7 +141,13 @@ pub fn read_query_tsv(path: &Path) -> Result<Vec<Accession>> {
         let cols: Vec<&str> = line.split('\t').collect();
         // Closure over this row: fetch a column's value by name, or "" if the
         // column is absent / the row is short.
-        let get = |name: &str| index.get(name).and_then(|&i| cols.get(i)).copied().unwrap_or("");
+        let get = |name: &str| {
+            index
+                .get(name)
+                .and_then(|&i| cols.get(i))
+                .copied()
+                .unwrap_or("")
+        };
 
         let line_no = n + 2; // +1 for the header row, +1 for 1-based counting
         let parse_u64 = |name: &str| -> Result<u64> {
@@ -247,4 +257,3 @@ mod tests {
         assert!(read_query_tsv(&path).is_err());
     }
 }
-

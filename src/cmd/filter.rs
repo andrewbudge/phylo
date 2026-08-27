@@ -1,5 +1,5 @@
-use phorge::parse_fasta;
 use clap::Args;
+use phorge::parse_fasta;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader};

@@ -1,5 +1,5 @@
-use phorge::{load_taxa_list, parse_fasta};
 use clap::Args;
+use phorge::{load_taxa_list, parse_fasta};
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
@@ -261,7 +261,10 @@ pub fn run(args: ConcatArgs) {
                 for row in &rows {
                     writeln!(f, "{}", row).unwrap();
                 }
-                eprintln!("\nTentative provenance log written to: {}", resolved.display());
+                eprintln!(
+                    "\nTentative provenance log written to: {}",
+                    resolved.display()
+                );
             } else {
                 eprintln!("\n=== Tentative Provenance TSV ===");
                 for row in &rows {

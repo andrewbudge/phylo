@@ -85,11 +85,7 @@ impl EutilsClient {
         let quota = Quota::per_second(NonZeroU32::new(rps).expect("rps is non-zero"));
         let limiter = RateLimiter::direct(quota);
         let http = reqwest::Client::builder()
-            .user_agent(format!(
-                "phorge/{} ({})",
-                env!("CARGO_PKG_VERSION"),
-                email
-            ))
+            .user_agent(format!("phorge/{} ({})", env!("CARGO_PKG_VERSION"), email))
             .build()?;
         Ok(Self {
             http,
@@ -303,7 +299,11 @@ impl EutilsClient {
         let ids: Vec<String> = result
             .get("idlist")
             .and_then(|v| v.as_array())
-            .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
             .unwrap_or_default();
         if ids.is_empty() {
             return Ok(Vec::new());
@@ -322,11 +322,20 @@ impl EutilsClient {
         let mut matches = Vec::with_capacity(ids.len());
         for id in &ids {
             let Some(doc) = result.get(id) else { continue };
-            let field = |k: &str| doc.get(k).and_then(|v| v.as_str()).unwrap_or_default().to_string();
+            let field = |k: &str| {
+                doc.get(k)
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string()
+            };
             matches.push(TaxonMatch {
                 taxid: id.parse().unwrap_or(0),
                 name: field("scientificname"),
-                rank: doc.get("rank").and_then(|v| v.as_str()).unwrap_or("no rank").to_string(),
+                rank: doc
+                    .get("rank")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("no rank")
+                    .to_string(),
                 division: field("division"),
             });
         }

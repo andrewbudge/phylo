@@ -1,5 +1,5 @@
-use phorge::{is_dna, parse_fasta, print_table};
 use clap::Args;
+use phorge::{is_dna, parse_fasta, print_table};
 use std::collections::HashMap;
 use std::path::Path;
 
