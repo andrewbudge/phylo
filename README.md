@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="https://raw.githubusercontent.com/andrewbudge/phorge/main/docs/phorge-assets/phorge-mark-ember.svg" alt="phorge logo" width="140">
+<img src="https://raw.githubusercontent.com/andrewbudge/phorge/main/docs/phorge-assets/phorge-mark-ember.svg" alt="phorge logo" width="200">
 
 # Phorge
 

@@ -24,21 +24,28 @@ pub struct ExtractArgs {
 
     /// Per-gene reference FASTAs (gene name = filename stem, e.g. COI.fasta ->
     /// COI). Each file may hold many sequences to cover divergence. Pipeline form.
+    /// Takes many values, so follow it with another flag (or --) before the
+    /// target files, otherwise it swallows them too.
     #[arg(long, num_args = 1..)]
     pub refs: Option<Vec<String>>,
 
-    /// Target FASTA files or a directory containing them (e.g. fetch's output dir)
-    #[arg(short, long, required = true, num_args = 1..)]
+    /// Target FASTA files, or a directory containing them (e.g. fetch's output dir)
+    #[arg(required = true, num_args = 1..)]
     pub targets: Vec<String>,
 
     /// Output directory for per-gene FASTAs
     #[arg(short, long)]
     pub output: String,
 
-    /// Minimum MMseqs2 sequence identity for a hit to be kept (0.0–1.0).
-    /// This is the sole quality gate; pick references that cover your taxa.
-    #[arg(long, default_value_t = 0.7)]
+    /// Minimum MMseqs2 sequence identity for a hit to be kept (0.0–1.0)
+    #[arg(short, long, default_value_t = 0.7)]
     pub min_identity: f64,
+
+    /// Minimum fraction of the REFERENCE gene the hit must span (0.0–1.0).
+    /// Identity says the bases that aligned matched; coverage says enough of
+    /// the gene aligned at all. Set 0.0 to keep partial hits of any length.
+    #[arg(short, long, default_value_t = 0.5)]
+    pub coverage: f64,
 
     /// Extra bases to grab on either side of each hit
     #[arg(long, default_value_t = 0)]
@@ -173,14 +180,15 @@ struct Hit {
     gene: String,
     target: String,
     identity: f64,
+    coverage: f64,
     tstart: usize,
     tend: usize,
 }
 
-// Parses MMseqs2 tabular output. The identity gate is applied in-engine via
-// --min-seq-id, so every row here already passed; we just carry fident through
-// for traceability in the output header.
-// Expected --format-output: query,target,fident,tstart,tend
+// Parses MMseqs2 tabular output. Both quality gates are applied in-engine
+// (--min-seq-id and -c), so every row here already passed; we carry fident and
+// qcov through only so they can be recorded in the output header.
+// Expected --format-output: query,target,fident,qcov,tstart,tend
 fn parse_hits(tsv_path: &Path) -> Vec<Hit> {
     let file = File::open(tsv_path).expect("Could not open MMseqs2 output");
     let reader = BufReader::new(file);
@@ -189,7 +197,7 @@ fn parse_hits(tsv_path: &Path) -> Vec<Hit> {
     for line in reader.lines() {
         let line = line.expect("Error reading MMseqs2 output");
         let f: Vec<&str> = line.split('\t').collect();
-        if f.len() < 5 {
+        if f.len() < 6 {
             continue;
         }
 
@@ -200,8 +208,9 @@ fn parse_hits(tsv_path: &Path) -> Vec<Hit> {
             gene,
             target: f[1].to_string(),
             identity: f[2].parse().unwrap_or(0.0),
-            tstart: f[3].parse().unwrap_or(1),
-            tend: f[4].parse().unwrap_or(1),
+            coverage: f[3].parse().unwrap_or(0.0),
+            tstart: f[4].parse().unwrap_or(1),
+            tend: f[5].parse().unwrap_or(1),
         });
     }
 
@@ -247,8 +256,8 @@ pub fn run(args: ExtractArgs) {
         .expect("Could not clone log file handle");
 
     eprintln!(
-        "Running MMseqs2 easy-search (min identity {})...",
-        args.min_identity
+        "Running MMseqs2 easy-search (min identity {}, min coverage {})...",
+        args.min_identity, args.coverage
     );
     let mut cmd = Command::new("mmseqs");
     cmd.args([
@@ -263,10 +272,18 @@ pub fn run(args: ExtractArgs) {
         &args.sensitivity.to_string(),
         "--min-seq-id",
         &args.min_identity.to_string(),
+        "-c",
+        &args.coverage.to_string(),
+        // cov-mode 2 = fraction of the QUERY covered. The reference is the
+        // query here, so this asks "how much of the gene did I recover?".
+        // Mode 0 (query AND target) would be useless: a 650 bp COI hit inside
+        // a 16 kb mitogenome covers ~4% of the target and every hit would die.
+        "--cov-mode",
+        "2",
         "--max-seqs",
         &args.max_seqs.to_string(),
         "--format-output",
-        "query,target,fident,tstart,tend",
+        "query,target,fident,qcov,tstart,tend",
     ]);
 
     // Only cap memory when the user asks; otherwise let MMseqs2 use what it wants.
@@ -318,8 +335,8 @@ pub fn run(args: ExtractArgs) {
 
         writeln!(
             writer,
-            ">{} [gene={} ident={:.3} src={} {}-{}]",
-            original_header, hit.gene, hit.identity, filename, start, end
+            ">{} [gene={} ident={:.3} cov={:.3} src={} {}-{}]",
+            original_header, hit.gene, hit.identity, hit.coverage, filename, start, end
         )
         .unwrap();
         writeln!(writer, "{}", extracted).unwrap();
