@@ -14,11 +14,11 @@ pub struct FetchArgs {
     /// Input: either a query TSV written by `query`, or a bare list of accessions
     /// (one per line, blank lines and `#` comments skipped) — e.g. from your own
     /// curation or piped in from another tool. Detected automatically from the
-    /// first line. Pass `-` to read from stdin (`cut -f1 query.tsv | phorge fetch
-    /// -q - ...`). A bare list carries no length or ingroup/outgroup metadata, so
-    /// --min-length/--max-length and cross-group dedup only take effect for a
-    /// query TSV.
-    #[arg(long, short = 'q')]
+    /// first line. Pass `-` to read from stdin, e.g.
+    /// `cut -f1 query.tsv | phorge fetch - -o run/ ...`. A bare list carries no
+    /// length or ingroup/outgroup metadata, so --min-length/--max-length and
+    /// cross-group dedup only take effect for a query TSV.
+    #[arg(required = true)]
     pub query: PathBuf,
 
     /// Output directory. Shards download here, then collapse into combined.fasta on success.
@@ -162,7 +162,7 @@ pub async fn run(args: FetchArgs) -> Result<()> {
     Ok(())
 }
 
-/// Load `-q`'s input and reduce it to the concrete set of accessions to
+/// Load the query input and reduce it to the concrete set of accessions to
 /// download. No network is touched here. Order of operations matters:
 /// ingroup-wins overlap resolution runs before dedup so a cross-group duplicate
 /// is always resolved in the ingroup's favour.
@@ -238,8 +238,8 @@ fn load_and_preflight(args: &FetchArgs) -> Result<Vec<FetchRecord>> {
     Ok(records)
 }
 
-/// Read `-q`'s target: a real path, or stdin when the argument is exactly `-`.
-/// This is what makes `cut -f1 query.tsv | phorge fetch -q - ...` work — the
+/// Read the query argument: a real path, or stdin when it is exactly `-`.
+/// This is what makes `cut -f1 query.tsv | phorge fetch - ...` work — the
 /// sniffing in [`parse_query_input`] then decides TSV vs bare-list on whatever
 /// came through, same as it would for a file.
 fn read_query_input(path: &Path) -> Result<String> {

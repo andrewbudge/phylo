@@ -293,16 +293,16 @@ query complete
 
 Download the sequences for a query TSV. Sequences download in shards directly into the output directory; once every shard succeeds they collapse into a single `<output>/combined.fasta` and the shards are removed. The download is resumable — a manifest tracks completed shards, so an interrupted run picks up where it left off, and a finished `combined.fasta` makes a re-run a no-op. Headers are written verbatim; rewriting them is `clean`'s job.
 
-`-q` also accepts a **bare list of accessions**, one per line, with blank lines and `#` comments skipped. The format is detected automatically, and `-q -` reads from stdin — so a list you curated by other means works without a round trip through `query`:
+The query argument also accepts a **bare list of accessions**, one per line, with blank lines and `#` comments skipped. The format is detected automatically, and `-` reads from stdin — so a list you curated by other means works without a round trip through `query`:
 
 ```bash
-$ cut -f1 felidae.tsv | tail -n +2 | phorge fetch -q - -o run/ -e you@example.org --yes
+$ cut -f1 felidae.tsv | tail -n +2 | phorge fetch - -o run/ -e you@example.org --yes
 ```
 
 A bare list carries no length or ingroup/outgroup metadata, so `--min-length`/`--max-length` and cross-group dedup apply only to a query TSV; pass them with a bare list and they are skipped with a warning.
 
 ```bash
-$ phorge fetch -e you@example.org -q run/query.tsv -o run/ --yes
+$ phorge fetch -e you@example.org run/query.tsv -o run/ --yes
 preflight ready to download  records=3586  chunks=8  est_mb=2.4
 shard written  chunk=0  records=500
 ...
@@ -310,7 +310,7 @@ fetch complete  chunks=8  records=3586  output=run/combined.fasta
 ```
 
 **Flags:**
-- `-q, --query` — query TSV from `query`, or a bare accession list; `-` reads stdin
+- `<QUERY>` — query TSV from `query`, or a bare accession list; `-` reads stdin (positional)
 - `-o, --output` — output directory; shards download here, then collapse into `combined.fasta` on success
 - `--min-length` / `--max-length` — drop records outside a length range before downloading (query TSV only)
 - `-e, --email` — email address required by NCBI ToS (required)
@@ -503,7 +503,7 @@ From taxon IDs to a supermatrix. The acquisition layer (`query → fetch → ext
 ```bash
 # 1. Acquire — TaxIDs in, one curated FASTA per gene out
 phorge query   -e you@example.org -i 89829 -o 241031,309676 -t COX1,12S -q run/query.tsv
-phorge fetch   -e you@example.org -q run/query.tsv -o run/ --yes
+phorge fetch   -e you@example.org run/query.tsv -o run/ --yes
 phorge extract --refs refs/*.fasta -o run/genes/ run/combined.fasta
 phorge clean   -q run/query.tsv run/genes/*.fasta -o run/clean/ --prefer MyLab
 
