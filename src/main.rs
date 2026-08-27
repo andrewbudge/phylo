@@ -76,7 +76,6 @@ fn log_dir(command: &Commands) -> Option<&Path> {
     match command {
         Commands::Query(a) => Some(a.log_dir.as_deref().unwrap_or(a.out.as_path())),
         Commands::Fetch(a) => Some(a.log_dir.as_deref().unwrap_or(a.out.as_path())),
-        Commands::Clean(a) => Some(a.log_dir.as_deref().unwrap_or(a.out.as_path())),
         _ => None,
     }
 }

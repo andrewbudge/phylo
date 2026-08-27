@@ -1,4 +1,7 @@
+use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::path::Path;
 
 /// A single nucleotide record returned by `query`, populated from an NCBI
 /// esummary docsum. No homology/locus information is present at this stage —
@@ -48,4 +51,79 @@ pub struct QueryResult {
     pub taxon_group: TaxonGroup,
     pub total_accessions: usize,
     pub accessions: Vec<Accession>,
+}
+
+/// Read a query TSV — an accession-keyed join table mapping each accession to
+/// its TaxID, taxon name, and other query-time metadata — into a flat list of
+/// [`Accession`]s. Columns are located by header name rather than position, so
+/// a user can reorder or drop columns with `awk`/`cut` before handing the file
+/// to `clean`; only `accession` is required, and any other missing column
+/// falls back to a sensible default (0 / empty / ingroup / false).
+pub fn read_query_tsv(path: &Path) -> Result<Vec<Accession>> {
+    let content =
+        std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+    let mut lines = content.lines();
+
+    let header = lines
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("{}: empty query file (no header row)", path.display()))?;
+    let index: HashMap<&str, usize> = header
+        .split('\t')
+        .enumerate()
+        .map(|(i, c)| (c, i))
+        .collect();
+    if !index.contains_key("accession") {
+        bail!(
+            "{}: query TSV missing required 'accession' column",
+            path.display()
+        );
+    }
+
+    let mut records = Vec::new();
+    for (n, line) in lines.enumerate() {
+        if line.is_empty() {
+            continue;
+        }
+        let cols: Vec<&str> = line.split('\t').collect();
+        // Closure over this row: fetch a column's value by name, or "" if the
+        // column is absent from this file / short in this row.
+        let get = |name: &str| {
+            index
+                .get(name)
+                .and_then(|&i| cols.get(i))
+                .copied()
+                .unwrap_or("")
+        };
+
+        let line_no = n + 2; // +1 for the header row, +1 for 1-based counting
+        let parse_u64 = |name: &str| -> Result<u64> {
+            let v = get(name);
+            if v.is_empty() {
+                return Ok(0);
+            }
+            v.parse()
+                .with_context(|| format!("{}:{line_no}: bad {name} value {v:?}", path.display()))
+        };
+
+        records.push(Accession {
+            accession: get("accession").to_string(),
+            taxon_name: get("taxon_name").to_string(),
+            taxid: parse_u64("taxid")?,
+            length: parse_u64("length")? as usize,
+            gene_annotation: get("gene_annotation").to_string(),
+            refseq: get("refseq") == "true",
+            source_db: get("source_db").to_string(),
+            query_taxid: parse_u64("query_taxid")?,
+            taxon_group: match get("taxon_group") {
+                "" | "ingroup" => TaxonGroup::Ingroup,
+                "outgroup" => TaxonGroup::Outgroup,
+                other => bail!(
+                    "{}:{line_no}: unknown taxon_group {other:?} (expected ingroup/outgroup)",
+                    path.display()
+                ),
+            },
+            taxonomic_outlier: get("taxonomic_outlier") == "true",
+        });
+    }
+    Ok(records)
 }
