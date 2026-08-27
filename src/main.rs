@@ -1,6 +1,4 @@
-use anyhow::Context;
 use clap::{Parser, Subcommand};
-use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::Instrument;
 use tracing_subscriber::EnvFilter;
@@ -69,20 +67,6 @@ enum Commands {
     Clean(cmd::clean::CleanArgs),
 }
 
-/// Directory the JSON log is written to: an explicit `--log-dir` if set,
-/// otherwise the command's output directory. Only the acquisition commands log
-/// to a file; the lean file tools keep plain stderr.
-fn log_dir(command: &Commands) -> Option<&Path> {
-    match command {
-        // query is stderr-only: it writes a single TSV file, not an output
-        // directory, so there is nowhere (and no need) for a JSON log.
-        Commands::Query(_) => None,
-        Commands::Fetch(a) => Some(a.log_dir.as_deref().unwrap_or(a.out.as_path())),
-        Commands::Clean(a) => Some(a.log_dir.as_deref().unwrap_or(a.out.as_path())),
-        _ => None,
-    }
-}
-
 fn command_name(command: &Commands) -> &'static str {
     match command {
         Commands::Getheaders(_) => "getheaders",
@@ -100,43 +84,18 @@ fn command_name(command: &Commands) -> &'static str {
     }
 }
 
-/// Two-layer tracing: a human-readable stderr layer (live narration) and, when
-/// the command has an output dir, an append-only JSON layer at
-/// `<out>/phorge.log.jsonl`. The same events land in both — the JSON file is
-/// the durable, machine-readable log that spans every invocation against this
-/// output directory.
-fn init_tracing(command: &Commands) -> anyhow::Result<()> {
+/// Single-layer tracing: human-readable narration on stderr. Every subcommand
+/// logs the same way — capture it with `2>` if you want a record.
+fn init_tracing() -> anyhow::Result<()> {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-    let stderr_layer = tracing_subscriber::fmt::layer()
-        .with_writer(std::io::stderr)
-        .with_target(false);
-
-    match log_dir(command) {
-        Some(dir) => {
-            std::fs::create_dir_all(dir)
-                .with_context(|| format!("creating output directory {}", dir.display()))?;
-            let path = dir.join("phorge.log.jsonl");
-            let file = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&path)
-                .with_context(|| format!("opening log file {}", path.display()))?;
-            let file_layer = tracing_subscriber::fmt::layer()
-                .json()
-                .with_writer(move || file.try_clone().expect("clone log-file handle"));
-            tracing_subscriber::registry()
-                .with(filter)
-                .with(stderr_layer)
-                .with(file_layer)
-                .init();
-        }
-        None => {
-            tracing_subscriber::registry()
-                .with(filter)
-                .with(stderr_layer)
-                .init();
-        }
-    }
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_writer(std::io::stderr)
+                .with_target(false),
+        )
+        .init();
     Ok(())
 }
 
@@ -146,7 +105,7 @@ async fn main() -> anyhow::Result<()> {
     reset_sigpipe();
 
     let cli = Cli::parse();
-    init_tracing(&cli.command)?;
+    init_tracing()?;
 
     // Tag every event in this invocation with a run-id so a single run can be
     // sliced out of the append-only log.
