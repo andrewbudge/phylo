@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="https://raw.githubusercontent.com/andrewbudge/phorge/main/docs/phorge-assets/phorge-mark-ember.svg" alt="phorge logo" width="140">
+<img src="https://raw.githubusercontent.com/andrewbudge/phorge/main/docs/phorge-assets/phorge-mark-ember.svg" alt="phorge logo" width="200">
 
 # Phorge
 
@@ -255,35 +255,54 @@ Taxon_C    ATCGNNNN
 ---
 ### query
 
-Search NCBI's `nuccore` database for one or more taxa and write a `query_results.json` manifest — the metadata spine that `fetch` and `clean` read. No sequences are downloaded at this stage; this only collects accessions and their TaxID/name/length. Each TaxID is expanded to its full subtree (`txidNNN[Organism:exp]`), excluding environmental samples.
+Search NCBI's `nuccore` database for one or more taxa and write a query TSV — the metadata spine that `fetch` and `clean` read. No sequences are downloaded at this stage; this only collects accessions and their TaxID/name/length. Each TaxID is expanded to its full subtree (`txidNNN[Organism:exp]`), excluding environmental samples.
+
+Ingroup and outgroup accept **names as well as TaxIDs**. A name is resolved against NCBI taxonomy and shown for confirmation before the search runs, so you can write `Felidae` instead of remembering `9681`.
+
+Output is a TSV with a header row, one accession per line. Because it is plain tab-separated text, you can filter it with the tools you already have before handing it to `fetch`:
+
+```bash
+$ phorge query -e you@example.org -i Felidae -t COX1,12S | awk -F'\t' 'NR==1 || $4 > 500' > felidae.tsv
+```
 
 Requires an internet connection and an email address (NCBI Terms of Service).
 
 **Example:**
 
 ```bash
-$ phorge query --ingroup 89829 --outgroup 241031 309676 -o run/ --email you@example.org
-querying nuccore for txid89829[Organism:exp]
+$ phorge query -e you@example.org -t COX1,12S -i Leptophlebiidae -o Ephemerellidae -q run/query.tsv
+Found Leptophlebiidae (89829). Is this correct? [y/N] y
+querying nuccore for txid89829[Organism:exp] AND (COX1[All Fields] OR 12S[All Fields])
 Leptophlebiidae (89829): 3437 records found; retrieving metadata...
 ...
 query complete
   total accessions: 3586
-  written to:       run/query_results.json
+  written to:       run/query.tsv
 ```
 
 **Flags:**
-- `--ingroup` — one or more ingroup TaxIDs (required)
-- `--outgroup` — one or more outgroup TaxIDs
-- `-o, --out` — output directory (writes `query_results.json` inside it), or a `.json` file path to write the manifest directly
-- `--email` — email address required by NCBI ToS (required)
+- `-i, --ingroup` — ingroup taxa: TaxIDs (`89829`) or names (`Leptophlebiidae`), comma-separated or repeated (required)
+- `-o, --outgroup` — outgroup taxa, same rules as `--ingroup`
+- `-t, --term` — search term(s) restricting results to loci of interest (e.g. `COX1,12S`). OR'd together, then AND'd onto each organism query
+- `-q, --query` — output query TSV; omit or pass `-` to write to stdout
+- `-e, --email` — email address required by NCBI ToS (required)
 - `--api-key` — NCBI API key (optional; raises the rate limit from 3 to 10 req/s)
+- `-y, --yes` — skip name-confirmation prompts; aborts on an ambiguous name rather than guessing
 ---
 ### fetch
 
-Download the sequences for a `query_results.json` manifest. Sequences download in shards directly into `<out>`; once every shard succeeds they collapse into a single `<out>/combined.fasta` and the shards are removed. The download is resumable — a manifest tracks completed shards, so an interrupted run picks up where it left off, and a finished `combined.fasta` makes a re-run a no-op. Headers are written verbatim; rewriting them is `clean`'s job.
+Download the sequences for a query TSV. Sequences download in shards directly into the output directory; once every shard succeeds they collapse into a single `<output>/combined.fasta` and the shards are removed. The download is resumable — a manifest tracks completed shards, so an interrupted run picks up where it left off, and a finished `combined.fasta` makes a re-run a no-op. Headers are written verbatim; rewriting them is `clean`'s job.
+
+The query argument also accepts a **bare list of accessions**, one per line, with blank lines and `#` comments skipped. The format is detected automatically, and `-` reads from stdin — so a list you curated by other means works without a round trip through `query`:
 
 ```bash
-$ phorge fetch -q run/query_results.json -o run/ --email you@example.org --yes
+$ cut -f1 felidae.tsv | tail -n +2 | phorge fetch - -o run/ -e you@example.org --yes
+```
+
+A bare list carries no length or ingroup/outgroup metadata, so `--min-length`/`--max-length` and cross-group dedup apply only to a query TSV; pass them with a bare list and they are skipped with a warning.
+
+```bash
+$ phorge fetch -e you@example.org run/query.tsv -o run/ --yes
 preflight ready to download  records=3586  chunks=8  est_mb=2.4
 shard written  chunk=0  records=500
 ...
@@ -291,21 +310,22 @@ fetch complete  chunks=8  records=3586  output=run/combined.fasta
 ```
 
 **Flags:**
-- `-q, --query` — path to `query_results.json` (from `query`)
-- `-o, --out` — output directory; shards download here, then collapse into `combined.fasta` on success
-- `--log-dir` — write the JSON log here instead of alongside the output (e.g. fast scratch); default: `<out>`
-- `--min-length` / `--max-length` — drop records outside a length range before downloading
-- `--email` — email address required by NCBI ToS (required)
+- `<QUERY>` — query TSV from `query`, or a bare accession list; `-` reads stdin (positional)
+- `-o, --output` — output directory; shards download here, then collapse into `combined.fasta` on success
+- `--min-length` / `--max-length` — drop records outside a length range before downloading (query TSV only)
+- `-e, --email` — email address required by NCBI ToS (required)
 - `--api-key` — NCBI API key (optional)
 - `--yes` — skip the download-size confirmation prompt (for non-interactive use)
 ---
 ### extract
 
-Extract gene regions from target organism sequences using homology search. Takes reference gene sequences and one or more target FASTAs (or a directory), runs MMseqs2 `easy-search`, and writes one output FASTA per gene containing the extracted region from each organism that had a hit. The extracted hit region is cut at the MMseqs2 coordinates; the original target header is preserved so downstream tools (`clean`) can recover the accession.
+Extract gene regions from target organism sequences using homology search. Takes reference gene sequences and one or more target FASTAs (or a directory) as positional arguments, runs MMseqs2 `easy-search`, and writes one output FASTA per gene containing the extracted region from each organism that had a hit. The extracted hit region is cut at the MMseqs2 coordinates; the original target header is preserved so downstream tools (`clean`) can recover the accession.
 
 References come in two forms (one is required):
 - `-r, --reference` — a single FASTA where each record header is the gene name (`>COX1`, `>ND2`). Convenient for ad-hoc use.
 - `--refs` — one FASTA per gene, where the filename stem is the gene name (`COI.fasta` → COI). Each file may hold several sequences to cover divergence across taxa. This is the pipeline form.
+
+Two gates decide whether a hit is kept: `-m` (identity) and `-c` (coverage). Coverage is measured against the **reference** gene, answering "how much of the gene did I actually recover" — a high-identity fragment covering 30% of the reference is a partial hit, and `-c` is what excludes it.
 
 Requires [MMseqs2](https://github.com/soedinglab/MMseqs2) installed and in your PATH.
 
@@ -315,9 +335,10 @@ Requires [MMseqs2](https://github.com/soedinglab/MMseqs2) installed and in your 
 # refs/ has one file per gene: COI.fasta, 16S.fasta, 28S.fasta, ...
 # run/combined.fasta is the multifasta written by fetch
 
-$ phorge extract --refs refs/*.fasta -t run/combined.fasta -o run/genes/
+$ phorge extract --refs refs/*.fasta -o run/genes/ run/combined.fasta
 Pooled 19 reference sequence(s).
 Pooling 8 target files...
+Running MMseqs2 easy-search (min identity 0.7, min coverage 0.5)...
 Parsing results...
 Done. Extracted 7 gene(s) from 3069 hits.
 
@@ -325,12 +346,15 @@ $ ls run/genes/
 12S.fasta  16S.fasta  18S.fasta  28S.fasta  COI.fasta  cytb.fasta  H3.fasta
 ```
 
+Note the flag order above: `--refs` takes many values, so another flag (here `-o`) must come between it and the positional target files. Otherwise `--refs` swallows the targets too. Do not use a bare `--` to separate them — that makes clap treat the remaining flags as positionals as well.
+
 **Flags:**
+- `<TARGETS>...` — target organism FASTA files or a directory containing them (positional)
 - `-r, --reference` — single reference FASTA, gene name = each record header (`>COX1`)
 - `--refs` — per-gene reference FASTAs, gene name = filename stem (`COI.fasta` → COI)
-- `-t, --targets` — target organism FASTA files or a directory containing them
 - `-o, --output` — output directory for per-gene FASTAs
-- `--min-identity` — minimum MMseqs2 sequence identity to keep a hit, 0.0–1.0 (default: 0.7); the sole quality gate, so choose references that cover your taxa
+- `-m, --min-identity` — minimum MMseqs2 sequence identity to keep a hit, 0.0–1.0 (default: 0.7)
+- `-c, --coverage` — minimum fraction of the reference gene a hit must cover, 0.0–1.0 (default: 0.5). Raise it to demand near-complete genes; set `0.0` to keep every fragment that passes identity
 - `-s, --sensitivity` — MMseqs2 sensitivity, 1.0 (fast) to 7.5 (max); default 5.7
 - `--max-seqs` — max target sequences each reference gene is aligned against (MMseqs2 `--max-seqs`, default 300). The prefilter keeps only the top N targets per gene by k-mer score, so if you have **more than 300 target sequences**, the least-similar ones silently get no hit — raise this above your target count for large runs
 - `--max-memory-limit` — cap MMseqs2 RAM by splitting the search into sequential chunks (e.g. `8G`); default: unlimited
@@ -339,27 +363,33 @@ $ ls run/genes/
 ---
 ### clean
 
-Join `extract`'s per-gene output back to `query_results.json`, rewrite headers to `TaxID|Name|Accession|Gene`, and deduplicate to one sequence per taxon per gene. This recovers the TaxID and clean taxon name that homology search alone doesn't carry, and collapses the many accessions NCBI holds per taxon down to a single best representative per gene.
+Join `extract`'s per-gene output back to the query TSV, rewrite headers to `TaxID|Name|Accession|Gene`, and deduplicate to one sequence per taxon per gene. This recovers the TaxID and clean taxon name that homology search alone doesn't carry, and collapses the many accessions NCBI holds per taxon down to a single best representative per gene.
 
-Dedup keeps the longest sequence per TaxID, breaking ties by extract identity. Records whose accession isn't found in `query_results.json` are dropped and reported (broken provenance is useless to `concat`).
+Dedup keeps the longest sequence per TaxID, breaking ties by extract identity. Records whose accession isn't found in the query TSV are dropped and reported (broken provenance is useless to `concat`).
+
+Input FASTAs are positional — a single file, a list, a glob, or a directory all work.
 
 ```bash
-$ phorge clean --genes-dir run/genes/ -q run/query_results.json -o run/clean/
+$ phorge clean -q run/query.tsv run/genes/*.fasta -o run/clean/
 Done. Wrote 591 cleaned sequence(s) across 7 gene file(s); dropped 2478 duplicate(s).
+
+$ ls run/clean/
+12S_std.fasta  16S_std.fasta  18S_std.fasta  28S_std.fasta  COI_std.fasta  cytb_std.fasta  H3_std.fasta
 ```
 
 Use `--prefer` to favour particular records during dedup — for example your own museum vouchers — even when they aren't the longest. A record is preferred if the substring appears in its extract header or its GenBank title:
 
 ```bash
-$ phorge clean --genes-dir run/genes/ -q run/query_results.json -o run/clean/ --prefer MyLab
+$ phorge clean -q run/query.tsv run/genes/ -o run/clean/ --prefer MyLab
 Done. Wrote 591 cleaned sequence(s) across 7 gene file(s); dropped 2478 duplicate(s).
   11 kept record(s) matched --prefer ["MyLab"].
 ```
 
 **Flags:**
-- `--genes-dir` — directory of per-gene FASTAs from `extract`
-- `-q, --query` — `query_results.json` (the accession → TaxID/name table)
-- `-o, --out` — output directory
+- `<INPUT>...` — per-gene FASTAs from `extract`: a file, list, glob, or directory (positional)
+- `-q, --query` — query TSV (the accession → TaxID/name table)
+- `-o, --output` — output directory
+- `-e, --extension` — suffix appended to output filenames for pipeline-stage tracking (default: `_std`, so `COI.fasta` → `COI_std.fasta`)
 - `--prefer` — prefer records whose extract header or GenBank title contains this substring during dedup; repeatable, and overrides the longest-sequence rule
 ---
 ### align (aln)
@@ -472,10 +502,10 @@ From taxon IDs to a supermatrix. The acquisition layer (`query → fetch → ext
 
 ```bash
 # 1. Acquire — TaxIDs in, one curated FASTA per gene out
-phorge query --ingroup 89829 --outgroup 241031 309676 -o run/ --email you@example.org
-phorge fetch   -q run/query_results.json -o run/ --email you@example.org --yes
-phorge extract --refs refs/*.fasta -t run/combined.fasta -o run/genes/
-phorge clean   --genes-dir run/genes/ -q run/query_results.json -o run/clean/ --prefer MyLab
+phorge query   -e you@example.org -i 89829 -o 241031,309676 -t COX1,12S -q run/query.tsv
+phorge fetch   -e you@example.org run/query.tsv -o run/ --yes
+phorge extract --refs refs/*.fasta -o run/genes/ run/combined.fasta
+phorge clean   -q run/query.tsv run/genes/*.fasta -o run/clean/ --prefer MyLab
 
 # 2. Build — align, trim, and concatenate into a supermatrix
 phorge align  -p mafft run/clean/*.fasta -e _aln -o run/aligned/

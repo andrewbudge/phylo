@@ -1,6 +1,6 @@
 [package]
 name = "phorge"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 description = "A composable CLI toolkit for phylogenetics: NCBI acquisition, homology-based gene extraction, alignment QC, and supermatrix concatenation in one binary."
 license = "MIT"
@@ -8,7 +8,7 @@ repository = "https://github.com/andrewbudge/phorge"
 readme = "README.md"
 keywords = ["phylogenetics", "bioinformatics", "fasta", "cli", "genomics"]
 categories = ["command-line-utilities", "science"]
-exclude = ["docs/"]
+exclude = ["docs/", "refinement_plan.md", ".claude/"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

@@ -1,5 +1,5 @@
-use phorge::print_table;
 use clap::Args;
+use phorge::print_table;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 

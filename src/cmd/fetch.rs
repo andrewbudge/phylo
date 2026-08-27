@@ -1,38 +1,44 @@
-use crate::models::{Accession, QueryResult, TaxonGroup};
+use crate::models::TaxonGroup;
 use crate::ncbi::EutilsClient;
 use anyhow::{Context, Result, bail};
 use clap::Args;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::io::{IsTerminal, Write};
+use std::io::{IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tracing::{info, warn};
 
 #[derive(Args)]
 pub struct FetchArgs {
-    /// Path to query_results.json (written by `query`)
-    #[arg(long, short = 'q')]
+    /// Input: either a query TSV written by `query`, or a bare list of accessions
+    /// (one per line, blank lines and `#` comments skipped) — e.g. from your own
+    /// curation or piped in from another tool. Detected automatically from the
+    /// first line. Pass `-` to read from stdin, e.g.
+    /// `cut -f1 query.tsv | phorge fetch - -o run/ ...`. A bare list carries no
+    /// length or ingroup/outgroup metadata, so --min-length/--max-length and
+    /// cross-group dedup only take effect for a query TSV.
+    #[arg(required = true)]
     pub query: PathBuf,
 
     /// Output directory. Shards download here, then collapse into combined.fasta on success.
     #[arg(long, short = 'o')]
-    pub out: PathBuf,
+    pub output: PathBuf,
 
-    /// Write the JSON log here instead of alongside the output (e.g. fast scratch).
-    #[arg(long)]
-    pub log_dir: Option<PathBuf>,
-
-    /// Drop records shorter than this before downloading (preflight trim)
+    /// Drop records shorter than this before downloading (preflight trim). Only
+    /// applies when the input is a query TSV with a length column — a bare
+    /// accession list has no length to filter on, and the filter is skipped with
+    /// a warning.
     #[arg(long)]
     pub min_length: Option<usize>,
 
-    /// Drop records longer than this before downloading (preflight trim)
+    /// Drop records longer than this before downloading (preflight trim). Same
+    /// query-TSV-only limitation as --min-length.
     #[arg(long)]
     pub max_length: Option<usize>,
 
     /// Email address required by NCBI ToS for automated access
-    #[arg(long)]
+    #[arg(long, short = 'e')]
     pub email: String,
 
     /// NCBI API key (optional; raises the NCBI rate limit from 3 to 10 req/s)
@@ -59,6 +65,17 @@ const FASTA_OVERHEAD: u64 = 80;
 /// Inline retry attempts per chunk before it is left `Failed` for a later resume.
 const MAX_CHUNK_RETRIES: u32 = 3;
 
+/// One record to download, reduced from either a query TSV row or a bare
+/// accession line. `length` and `taxon_group` are only ever populated together,
+/// from a query TSV's `length`/`taxon_group` columns — a bare accession list has
+/// neither, which is why the ingroup-wins overlap rule and length filtering both
+/// degrade to no-ops for it (see [`load_and_preflight`]).
+struct FetchRecord {
+    accession: String,
+    length: Option<usize>,
+    taxon_group: Option<TaxonGroup>,
+}
+
 /// Persistent, resumable record of a download. The authoritative resume signal is
 /// which shard files exist on disk (see [`Manifest::reconcile`]); this document
 /// carries the explicit accession-per-chunk mapping and provenance. Written
@@ -68,7 +85,11 @@ const MAX_CHUNK_RETRIES: u32 = 3;
 struct Manifest {
     run_id: String,
     total_records: usize,
-    est_bytes: u64,
+    /// `None` when any input record's length is unknown (i.e. a bare accession
+    /// list) — an estimate built from a mix of real and assumed-zero lengths
+    /// would be actively misleading, so the confirmation prompt reports "unknown"
+    /// instead.
+    est_bytes: Option<u64>,
     chunks: Vec<Chunk>,
 }
 
@@ -89,7 +110,7 @@ enum ChunkState {
 }
 
 pub async fn run(args: FetchArgs) -> Result<()> {
-    let out_dir = args.out.clone();
+    let out_dir = args.output.clone();
     let combined_path = out_dir.join("combined.fasta");
 
     // A combined file exists only once a prior run fully succeeded and collapsed
@@ -141,36 +162,36 @@ pub async fn run(args: FetchArgs) -> Result<()> {
     Ok(())
 }
 
-/// Load `query_results.json` and reduce it to the concrete set of accessions to
-/// download. Metadata only — `slen` was captured at query time, so no network is
-/// touched here. Order of operations matters: ingroup-wins overlap resolution
-/// runs before dedup so a cross-group duplicate is always resolved in the
-/// ingroup's favour.
-fn load_and_preflight(args: &FetchArgs) -> Result<Vec<Accession>> {
-    let content = std::fs::read_to_string(&args.query)
-        .with_context(|| format!("reading {}", args.query.display()))?;
-    let results: Vec<QueryResult> = serde_json::from_str(&content)
-        .with_context(|| format!("parsing {}", args.query.display()))?;
-
-    let mut records: Vec<Accession> = results.into_iter().flat_map(|r| r.accessions).collect();
+/// Load the query input and reduce it to the concrete set of accessions to
+/// download. No network is touched here. Order of operations matters:
+/// ingroup-wins overlap resolution runs before dedup so a cross-group duplicate
+/// is always resolved in the ingroup's favour.
+fn load_and_preflight(args: &FetchArgs) -> Result<Vec<FetchRecord>> {
+    let content = read_query_input(&args.query)?;
+    let mut records =
+        parse_query_input(&content).with_context(|| format!("parsing {}", args.query.display()))?;
     let records_in = records.len();
 
     // Ingroup wins: a sequence cannot honestly be both ingroup and outgroup, so
     // drop the outgroup copy of any accession that also appears in the ingroup.
-    // Owned (not borrowed from `records`) so the set outlives the retain below.
+    // A bare accession list has no taxon_group at all, so both sides of this
+    // comparison are always `None` for it and the retain is a no-op — no
+    // special-casing needed. Owned (not borrowed from `records`) so the set
+    // outlives the retain below.
     let ingroup_ids: HashSet<String> = records
         .iter()
-        .filter(|a| a.taxon_group == TaxonGroup::Ingroup)
+        .filter(|a| a.taxon_group == Some(TaxonGroup::Ingroup))
         .map(|a| a.accession.clone())
         .collect();
     let mut dropped_overlap = 0usize;
     records.retain(|a| {
-        let drop = a.taxon_group == TaxonGroup::Outgroup && ingroup_ids.contains(&a.accession);
+        let drop =
+            a.taxon_group == Some(TaxonGroup::Outgroup) && ingroup_ids.contains(&a.accession);
         dropped_overlap += usize::from(drop);
         !drop
     });
 
-    // Dedup by accession string, first-seen wins. The query array lists ingroup
+    // Dedup by accession string, first-seen wins. The query TSV lists ingroup
     // taxa first, so first-seen preserves ingroup provenance for within-set dupes.
     let mut seen: HashSet<String> = HashSet::with_capacity(records.len());
     let mut dropped_dup = 0usize;
@@ -182,15 +203,24 @@ fn load_and_preflight(args: &FetchArgs) -> Result<Vec<Accession>> {
 
     // Optional, off-by-default length trim. The byte-gate below is the primary
     // cost control; these bounds are an opt-in trim for obvious genomes/fragments.
+    // Only a query TSV carries lengths; a bare accession list has none to filter
+    // on, so we warn and fetch everything rather than guessing.
     let mut dropped_len = 0usize;
     if args.min_length.is_some() || args.max_length.is_some() {
-        let min = args.min_length.unwrap_or(0);
-        let max = args.max_length.unwrap_or(usize::MAX);
-        records.retain(|a| {
-            let keep = a.length >= min && a.length <= max;
-            dropped_len += usize::from(!keep);
-            keep
-        });
+        if records.iter().any(|a| a.length.is_some()) {
+            let min = args.min_length.unwrap_or(0);
+            let max = args.max_length.unwrap_or(usize::MAX);
+            records.retain(|a| {
+                let keep = a.length.is_none_or(|len| len >= min && len <= max);
+                dropped_len += usize::from(!keep);
+                keep
+            });
+        } else {
+            warn!(
+                "--min-length/--max-length need a query TSV's length column; \
+                 ignoring for this bare accession list"
+            );
+        }
     }
 
     info!(
@@ -208,12 +238,101 @@ fn load_and_preflight(args: &FetchArgs) -> Result<Vec<Accession>> {
     Ok(records)
 }
 
+/// Read the query argument: a real path, or stdin when it is exactly `-`.
+/// This is what makes `cut -f1 query.tsv | phorge fetch - ...` work — the
+/// sniffing in [`parse_query_input`] then decides TSV vs bare-list on whatever
+/// came through, same as it would for a file.
+fn read_query_input(path: &Path) -> Result<String> {
+    if path == Path::new("-") {
+        let mut buf = String::new();
+        std::io::stdin()
+            .read_to_string(&mut buf)
+            .context("reading query input from stdin")?;
+        Ok(buf)
+    } else {
+        std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))
+    }
+}
+
+/// Sniff the query input and parse it into fetch records. A query TSV is
+/// detected by its header row: the first non-blank line contains a tab. Anything
+/// else is treated as a bare accession list — one accession per line, blank
+/// lines and `#` comments skipped — which is how a user's own hand-curated or
+/// tool-generated accession list gets in.
+fn parse_query_input(content: &str) -> Result<Vec<FetchRecord>> {
+    let mut lines = content.lines().map(str::trim).filter(|l| !l.is_empty());
+    let Some(first) = lines.next() else {
+        bail!("query input is empty");
+    };
+
+    if first.contains('\t') {
+        parse_query_tsv(first, lines)
+    } else {
+        Ok(std::iter::once(first)
+            .chain(lines)
+            .filter(|l| !l.starts_with('#'))
+            .map(|accession| FetchRecord {
+                accession: accession.to_string(),
+                length: None,
+                taxon_group: None,
+            })
+            .collect())
+    }
+}
+
+/// Parse a tab-separated query file: `header` is the already-consumed first
+/// line, `rows` the remaining lines. Columns are matched by name
+/// (case-insensitive) rather than position, so column order — and which extra
+/// columns a user's own filtering with `cut`/`awk` leaves in — doesn't matter.
+/// Only `accession` is required; `length` and `taxon_group` are read when
+/// present so length filtering and ingroup-wins overlap resolution can run.
+fn parse_query_tsv<'a>(
+    header: &str,
+    rows: impl Iterator<Item = &'a str>,
+) -> Result<Vec<FetchRecord>> {
+    let columns: Vec<&str> = header.split('\t').map(str::trim).collect();
+    let col_index = |name: &str| columns.iter().position(|c| c.eq_ignore_ascii_case(name));
+    let accession_col = col_index("accession").context("query TSV has no 'accession' column")?;
+    let length_col = col_index("length");
+    let group_col = col_index("taxon_group");
+
+    let mut records = Vec::new();
+    for row in rows {
+        let fields: Vec<&str> = row.split('\t').collect();
+        // A ragged row (e.g. a trailing blank field trimmed by hand) is skipped
+        // rather than panicking — the file might have been hand-edited.
+        let Some(accession) = fields.get(accession_col) else {
+            continue;
+        };
+        let length = length_col
+            .and_then(|i| fields.get(i))
+            .and_then(|s| s.trim().parse::<usize>().ok());
+        let taxon_group = group_col.and_then(|i| fields.get(i)).and_then(|s| {
+            match s.trim().to_ascii_lowercase().as_str() {
+                "ingroup" => Some(TaxonGroup::Ingroup),
+                "outgroup" => Some(TaxonGroup::Outgroup),
+                _ => None,
+            }
+        });
+        records.push(FetchRecord {
+            accession: accession.trim().to_string(),
+            length,
+            taxon_group,
+        });
+    }
+    Ok(records)
+}
+
 impl Manifest {
-    fn build(records: Vec<Accession>) -> Self {
+    fn build(records: Vec<FetchRecord>) -> Self {
         let total_records = records.len();
-        let est_bytes = records
+        // `Option<u64>: Sum<Option<u64>>` collapses to `None` as soon as any
+        // record's length is unknown, which is exactly the "all or nothing"
+        // behaviour we want: a bare accession list has no lengths at all, so the
+        // whole estimate is reported as unknown rather than partially guessed.
+        let est_bytes: Option<u64> = records
             .iter()
-            .map(|a| a.length as u64 + FASTA_OVERHEAD)
+            .map(|a| a.length.map(|len| len as u64 + FASTA_OVERHEAD))
             .sum();
         let chunks = records
             .chunks(CHUNK_SIZE)
@@ -407,11 +526,16 @@ fn run_id() -> String {
 /// errors rather than silently downloading. The prompt is interactive I/O, so it
 /// goes straight to stderr rather than through the log.
 fn confirm(manifest: &Manifest, yes: bool) -> Result<()> {
-    let mb = manifest.est_bytes as f64 / 1_048_576.0;
+    // A bare accession list carries no lengths, so there's nothing to estimate
+    // size from — say so plainly rather than showing a fabricated number.
+    let size_desc = match manifest.est_bytes {
+        Some(bytes) => format!("~{:.1} MB", bytes as f64 / 1_048_576.0),
+        None => "unknown size (bare accession list; no length data)".to_string(),
+    };
     info!(
         records = manifest.total_records,
         chunks = manifest.chunks.len(),
-        est_mb = format!("{mb:.1}"),
+        est_size = %size_desc,
         "preflight ready to download"
     );
     if yes {
@@ -424,7 +548,7 @@ fn confirm(manifest: &Manifest, yes: bool) -> Result<()> {
         );
     }
     eprint!(
-        "About to download {} sequences in {} chunk(s) (~{mb:.1} MB). Continue? [y/N] ",
+        "About to download {} sequences in {} chunk(s) ({size_desc}). Continue? [y/N] ",
         manifest.total_records,
         manifest.chunks.len()
     );
@@ -437,4 +561,42 @@ fn confirm(manifest: &Manifest, yes: bool) -> Result<()> {
         bail!("aborted by user");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bare_accession_list_skips_blanks_and_comments() {
+        let input = "# my curated accessions\nAB123456.1\nCD654321.1\n\nEF999999.1\n";
+        let records = parse_query_input(input).unwrap();
+        let accessions: Vec<&str> = records.iter().map(|r| r.accession.as_str()).collect();
+        assert_eq!(accessions, ["AB123456.1", "CD654321.1", "EF999999.1"]);
+        // No metadata comes from a bare list — length filtering and ingroup-wins
+        // overlap resolution both rely on this being None.
+        assert!(records.iter().all(|r| r.length.is_none()));
+        assert!(records.iter().all(|r| r.taxon_group.is_none()));
+    }
+
+    #[test]
+    fn query_tsv_is_detected_and_columns_read_by_name() {
+        // Column order deliberately doesn't match the field declaration order,
+        // to prove lookup is by name, not position.
+        let input = "taxon_group\taccession\tlength\n\
+                      ingroup\tAB123456.1\t650\n\
+                      outgroup\tCD654321.1\t720\n";
+        let records = parse_query_input(input).unwrap();
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].accession, "AB123456.1");
+        assert_eq!(records[0].length, Some(650));
+        assert_eq!(records[0].taxon_group, Some(TaxonGroup::Ingroup));
+        assert_eq!(records[1].taxon_group, Some(TaxonGroup::Outgroup));
+    }
+
+    #[test]
+    fn tsv_without_accession_column_is_rejected() {
+        let input = "taxon_name\tlength\nfelis catus\t650\n";
+        assert!(parse_query_input(input).is_err());
+    }
 }
