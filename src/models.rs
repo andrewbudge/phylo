@@ -247,3 +247,4 @@ mod tests {
         assert!(read_query_tsv(&path).is_err());
     }
 }
+
