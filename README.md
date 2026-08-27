@@ -323,7 +323,7 @@ Extract gene regions from target organism sequences using homology search. Takes
 
 References come in two forms (one is required):
 - `-r, --reference` — a single FASTA where each record header is the gene name (`>COX1`, `>ND2`). Convenient for ad-hoc use.
-- `--refs` — one FASTA per gene, where the filename stem is the gene name (`COI.fasta` → COI). Each file may hold several sequences to cover divergence across taxa. This is the pipeline form.
+- `--refs` — a directory of per-gene FASTAs, where each filename stem is the gene name (`COI.fasta` → COI). Each file may hold several sequences to cover divergence across taxa. This is the pipeline form. Repeat the flag to draw from more than one directory.
 
 Two gates decide whether a hit is kept: `-m` (identity) and `-c` (coverage). Coverage is measured against the **reference** gene, answering "how much of the gene did I actually recover" — a high-identity fragment covering 30% of the reference is a partial hit, and `-c` is what excludes it.
 
@@ -335,7 +335,7 @@ Requires [MMseqs2](https://github.com/soedinglab/MMseqs2) installed and in your 
 # refs/ has one file per gene: COI.fasta, 16S.fasta, 28S.fasta, ...
 # run/combined.fasta is the multifasta written by fetch
 
-$ phorge extract --refs refs/*.fasta -o run/genes/ run/combined.fasta
+$ phorge extract --refs refs/ -o run/genes/ run/combined.fasta
 Pooled 19 reference sequence(s).
 Pooling 8 target files...
 Running MMseqs2 easy-search (min identity 0.7, min coverage 0.5)...
@@ -346,12 +346,10 @@ $ ls run/genes/
 12S.fasta  16S.fasta  18S.fasta  28S.fasta  COI.fasta  cytb.fasta  H3.fasta
 ```
 
-Note the flag order above: `--refs` takes many values, so another flag (here `-o`) must come between it and the positional target files. Otherwise `--refs` swallows the targets too. Do not use a bare `--` to separate them — that makes clap treat the remaining flags as positionals as well.
-
 **Flags:**
 - `<TARGETS>...` — target organism FASTA files or a directory containing them (positional)
 - `-r, --reference` — single reference FASTA, gene name = each record header (`>COX1`)
-- `--refs` — per-gene reference FASTAs, gene name = filename stem (`COI.fasta` → COI)
+- `--refs` — directory of per-gene reference FASTAs, gene name = filename stem (`COI.fasta` → COI); repeatable
 - `-o, --output` — output directory for per-gene FASTAs
 - `-m, --min-identity` — minimum MMseqs2 sequence identity to keep a hit, 0.0–1.0 (default: 0.7)
 - `-c, --coverage` — minimum fraction of the reference gene a hit must cover, 0.0–1.0 (default: 0.5). Raise it to demand near-complete genes; set `0.0` to keep every fragment that passes identity
@@ -504,7 +502,7 @@ From taxon IDs to a supermatrix. The acquisition layer (`query → fetch → ext
 # 1. Acquire — TaxIDs in, one curated FASTA per gene out
 phorge query   -e you@example.org -i 89829 -o 241031,309676 -t COX1,12S -q run/query.tsv
 phorge fetch   -e you@example.org run/query.tsv -o run/ --yes
-phorge extract --refs refs/*.fasta -o run/genes/ run/combined.fasta
+phorge extract --refs refs/ -o run/genes/ run/combined.fasta
 phorge clean   -q run/query.tsv run/genes/*.fasta -o run/clean/ --prefer MyLab
 
 # 2. Build — align, trim, and concatenate into a supermatrix

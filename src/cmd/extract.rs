@@ -22,11 +22,11 @@ pub struct ExtractArgs {
     #[arg(short, long)]
     pub reference: Option<String>,
 
-    /// Per-gene reference FASTAs (gene name = filename stem, e.g. COI.fasta ->
-    /// COI). Each file may hold many sequences to cover divergence. Pipeline form.
-    /// Takes many values, so follow it with another flag (or --) before the
-    /// target files, otherwise it swallows them too.
-    #[arg(long, num_args = 1..)]
+    /// Directory of per-gene reference FASTAs, or a single such file (gene name
+    /// = filename stem, e.g. COI.fasta -> COI). Each file may hold many
+    /// sequences to cover divergence. Pipeline form. Repeat the flag to draw
+    /// from several directories.
+    #[arg(long, num_args = 1)]
     pub refs: Option<Vec<String>>,
 
     /// Target FASTA files, or a directory containing them (e.g. fetch's output dir)
@@ -102,10 +102,55 @@ fn collect_targets(targets: &[String]) -> Vec<String> {
     files
 }
 
+// `--refs` takes one value per occurrence, so a shell glob (`--refs refs/*.fa`)
+// silently splits: the first file becomes the reference and the rest land in
+// TARGETS. That costs you every gene but the first, with no error — so when a
+// target sits in the same directory as a `--refs` file, say so. A warning, not
+// an error: keeping references and targets in one directory is unusual but not
+// forbidden.
+fn warn_refs_leaked_into_targets(args: &ExtractArgs, target_files: &[String]) {
+    let Some(refs) = &args.refs else { return };
+    let ref_dirs: Vec<&Path> = refs
+        .iter()
+        .map(Path::new)
+        .filter(|p| p.is_file())
+        .filter_map(|p| p.parent())
+        .collect();
+
+    let leaked: Vec<&String> = target_files
+        .iter()
+        .filter(|t| Path::new(t).parent().is_some_and(|d| ref_dirs.contains(&d)))
+        .collect();
+
+    if !leaked.is_empty() {
+        eprintln!(
+            "Warning: {} target file(s) sit in a --refs directory: {}",
+            leaked.len(),
+            leaked
+                .iter()
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        eprintln!(
+            "  --refs takes ONE value; a glob like `--refs refs/*.fasta` leaves the rest as targets."
+        );
+        eprintln!("  Pass the directory instead: --refs {}", {
+            let d = ref_dirs[0].to_string_lossy();
+            if d.is_empty() {
+                ".".to_string()
+            } else {
+                d.into_owned()
+            }
+        });
+    }
+}
+
 // Writes a pooled reference FASTA whose record IDs encode the gene name as
 // `gene::N`, so MMseqs2 reports the gene in its `query` column. The gene name
 // comes from the record header (single --reference file) or the filename stem
-// (per-gene --refs files). Returns the number of reference records written.
+// (--refs, whose directories are expanded to their FASTAs first). Returns the
+// number of reference records written.
 fn pool_references(args: &ExtractArgs, pooled_path: &Path) -> usize {
     let mut writer = File::create(pooled_path).expect("Could not create pooled reference file");
     let mut counter = 0usize;
@@ -120,15 +165,18 @@ fn pool_references(args: &ExtractArgs, pooled_path: &Path) -> usize {
             counter += 1;
         }
     } else if let Some(refs) = &args.refs {
-        for file in refs {
-            let path = Path::new(file);
+        // Each --refs value is a directory of per-gene FASTAs or a single such
+        // file; collect_targets flattens both to a plain file list, so a gene's
+        // name is always the stem of a real file by the time we get here.
+        for file in collect_targets(refs) {
+            let path = Path::new(&file);
             let gene = path
                 .file_stem()
                 .unwrap()
                 .to_str()
                 .unwrap()
                 .replace(' ', "_");
-            let (seqs, _) = parse_fasta(file, false).expect("Failed to read reference FASTA");
+            let (seqs, _) = parse_fasta(&file, false).expect("Failed to read reference FASTA");
             for (_header, seq) in &seqs {
                 writeln!(writer, ">{}::{}", gene, counter).unwrap();
                 writeln!(writer, "{}", seq).unwrap();
@@ -231,6 +279,7 @@ pub fn run(args: ExtractArgs) {
         eprintln!("Error: no target FASTA files found.");
         std::process::exit(1);
     }
+    warn_refs_leaked_into_targets(&args, &target_files);
 
     // Output dir holds the per-gene FASTAs and the mmseqs log; create it up front.
     fs::create_dir_all(&args.output).expect("Could not create output directory");
@@ -245,6 +294,13 @@ pub fn run(args: ExtractArgs) {
     let mmseqs_tmp = tmp_dir.join("mmseqs_tmp");
 
     let n_refs = pool_references(&args, &pooled_ref_path);
+    if n_refs == 0 {
+        // Nothing to search with: an empty --refs directory, or a reference file
+        // holding no records. Fail here rather than handing MMseqs2 an empty
+        // query set and reporting zero hits as though the search had run.
+        eprintln!("Error: no reference sequences found.");
+        std::process::exit(1);
+    }
     eprintln!("Pooled {} reference sequence(s).", n_refs);
     eprintln!("Pooling {} target files...", target_files.len());
     let lookup = pool_targets(&target_files, &pooled_path);
