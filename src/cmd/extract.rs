@@ -6,7 +6,7 @@ use std::process::Command;
 
 use clap::{ArgGroup, Args};
 
-use phorge::parse_fasta;
+use phorge::{parse_fasta, reverse_complement};
 
 #[derive(Args)]
 // Exactly one reference form is required: a single multi-gene file, or one
@@ -229,14 +229,22 @@ struct Hit {
     target: String,
     identity: f64,
     coverage: f64,
+    /// Always the lower coordinate, whatever strand the hit was on.
     tstart: usize,
+    /// Always the higher coordinate.
     tend: usize,
+    /// True when MMseqs2 reported the hit on the minus strand (it emits
+    /// qstart > qend for those). The extracted slice must be
+    /// reverse-complemented before it is written, or the record comes out in
+    /// the opposite orientation to every plus-strand record for the same gene
+    /// and no aligner can reconcile them.
+    minus_strand: bool,
 }
 
 // Parses MMseqs2 tabular output. Both quality gates are applied in-engine
 // (--min-seq-id and -c), so every row here already passed; we carry fident and
 // qcov through only so they can be recorded in the output header.
-// Expected --format-output: query,target,fident,qcov,tstart,tend
+// Expected --format-output: query,target,fident,qcov,qstart,qend,tstart,tend
 fn parse_hits(tsv_path: &Path) -> Vec<Hit> {
     let file = File::open(tsv_path).expect("Could not open MMseqs2 output");
     let reader = BufReader::new(file);
@@ -245,20 +253,31 @@ fn parse_hits(tsv_path: &Path) -> Vec<Hit> {
     for line in reader.lines() {
         let line = line.expect("Error reading MMseqs2 output");
         let f: Vec<&str> = line.split('\t').collect();
-        if f.len() < 6 {
+        if f.len() < 8 {
             continue;
         }
 
         // query is `gene::N`; recover the gene name before the separator.
         let gene = f[0].split("::").next().unwrap_or(f[0]).to_string();
 
+        // MMseqs2 signals a minus-strand hit on the QUERY coordinates, not the
+        // target: it reports qstart > qend and leaves the target range forward
+        // (e.g. qstart=660 qend=1, tstart=201 tend=860). Reading the strand off
+        // tstart/tend instead would never fire.
+        let qstart: usize = f[4].parse().unwrap_or(1);
+        let qend: usize = f[5].parse().unwrap_or(1);
+        let tstart: usize = f[6].parse().unwrap_or(1);
+        let tend: usize = f[7].parse().unwrap_or(1);
+
         hits.push(Hit {
             gene,
             target: f[1].to_string(),
             identity: f[2].parse().unwrap_or(0.0),
             coverage: f[3].parse().unwrap_or(0.0),
-            tstart: f[4].parse().unwrap_or(1),
-            tend: f[5].parse().unwrap_or(1),
+            // Normalised defensively; the target range is already forward.
+            tstart: tstart.min(tend),
+            tend: tstart.max(tend),
+            minus_strand: qstart > qend,
         });
     }
 
@@ -339,7 +358,7 @@ pub fn run(args: ExtractArgs) {
         "--max-seqs",
         &args.max_seqs.to_string(),
         "--format-output",
-        "query,target,fident,qcov,tstart,tend",
+        "query,target,fident,qcov,qstart,qend,tstart,tend",
     ]);
 
     // Only cap memory when the user asks; otherwise let MMseqs2 use what it wants.
@@ -376,13 +395,21 @@ pub fn run(args: ExtractArgs) {
             }
         };
 
-        // MMseqs2 coordinates are 1-based inclusive. Convert to 0-based for Rust slicing.
-        // tstart may be > tend on minus-strand hits — take min/max to always get a valid range.
-        let raw_start = hit.tstart.min(hit.tend) - 1;
-        let raw_end = hit.tstart.max(hit.tend);
-        let start = raw_start.saturating_sub(args.flank);
-        let end = (raw_end + args.flank).min(seq.len());
-        let extracted = &seq[start..end];
+        // MMseqs2 coordinates are 1-based inclusive; parse_hits already put them
+        // in (low, high) order, so this only has to shift to 0-based for slicing.
+        let start = hit.tstart.saturating_sub(1).saturating_sub(args.flank);
+        let end = (hit.tend + args.flank).min(seq.len());
+
+        // A minus-strand hit sits in the target in the opposite orientation to
+        // the reference, so the raw slice reads backwards. Flip it, and the
+        // flank comes along correctly: reverse-complementing the widened slice
+        // puts the upstream flank where a reader expects it.
+        let extracted = if hit.minus_strand {
+            reverse_complement(&seq[start..end])
+        } else {
+            seq[start..end].to_string()
+        };
+        let strand = if hit.minus_strand { '-' } else { '+' };
 
         let writer = gene_writers.entry(hit.gene.clone()).or_insert_with(|| {
             let out_path = Path::new(&args.output).join(format!("{}.fasta", hit.gene));
@@ -391,8 +418,8 @@ pub fn run(args: ExtractArgs) {
 
         writeln!(
             writer,
-            ">{} [gene={} ident={:.3} cov={:.3} src={} {}-{}]",
-            original_header, hit.gene, hit.identity, hit.coverage, filename, start, end
+            ">{} [gene={} ident={:.3} cov={:.3} strand={} src={} {}-{}]",
+            original_header, hit.gene, hit.identity, hit.coverage, strand, filename, start, end
         )
         .unwrap();
         writeln!(writer, "{}", extracted).unwrap();

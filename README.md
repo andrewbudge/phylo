@@ -325,6 +325,8 @@ References come in two forms (one is required):
 - `-r, --reference` — a single FASTA where each record header is the gene name (`>COX1`, `>ND2`). Convenient for ad-hoc use.
 - `--refs` — a directory of per-gene FASTAs, where each filename stem is the gene name (`COI.fasta` → COI). Each file may hold several sequences to cover divergence across taxa. This is the pipeline form. Repeat the flag to draw from more than one directory.
 
+Hits found on the minus strand are reverse-complemented back into the reference's orientation before they are written, and the strand is recorded in the output header (`strand=+` / `strand=-`). Without that, a gene encoded on the opposite strand comes out backwards and no aligner can reconcile it with its plus-strand counterparts.
+
 Two gates decide whether a hit is kept: `-m` (identity) and `-c` (coverage). Coverage is measured against the **reference** gene, answering "how much of the gene did I actually recover" — a high-identity fragment covering 30% of the reference is a partial hit, and `-c` is what excludes it.
 
 Requires [MMseqs2](https://github.com/soedinglab/MMseqs2) installed and in your PATH.
